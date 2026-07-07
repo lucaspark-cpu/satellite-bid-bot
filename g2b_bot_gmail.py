@@ -7,13 +7,15 @@ from datetime import datetime, timedelta
 
 # 1. 이메일 발송 설정 정보
 SENDER_EMAIL = 'lucas.park@dabeeo.com'
-SENDER_PASSWORD = 'yxphvbqxpucobyut'  # 💡 구글 앱 비밀번호 공백 완전히 제거
-RECEIVER_EMAIL = [
+SENDER_PASSWORD = 'yxphvbqxpucobyut' 
+
+# 변수명을 RECEIVER_LIST로 정의합니다.
+RECEIVER_LIST = [
     'lucas.park@dabeeo.com',
     'joohyeon.kim@dabeeo.com'
 ]
 
-# 💡 파이썬이 인식할 수 있도록 쉼표(,)로 연결된 하나의 문자열로 자동 변환합니다.
+# 이제 정상적으로 RECEIVER_LIST를 조합하여 RECEIVER_EMAIL을 만듭니다.
 RECEIVER_EMAIL = ", ".join(RECEIVER_LIST)
 
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
