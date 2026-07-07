@@ -90,17 +90,24 @@ def send_email(bid_html):
     msg['From'] = sender_email
     msg['To'] = ", ".join(receiver_list)
     
+  # defense_brief.py 파일 내 send_email 함수의 html_body 부분만 아래와 같이 교체해 보세요.
     html_body = f"""
     <html>
-    <body>
+    <body style='font-family: Arial, sans-serif; line-height: 1.6;'>
         <h2>🛡️ 신안보 9시 테크-브리핑</h2>
         <p>본 메일은 정부의 미래 신안보 혁신기업 육성 방향 및 글로벌 시장 동향을 반영한 자동화 브리핑입니다.</p>
-        <hr>
+        
+        <div style='background-color: #f4f7fa; border-left: 5px solid #0066cc; padding: 12px; margin-bottom: 20px; font-size: 13px; color: #333;'>
+            📌 <b>국방전자조달(D2B) 시스템 이용 안내</b><br>
+            군 안보 시스템 보안 정책상 공고 상세페이지로의 직접 링크가 제한됩니다. <br>
+            우측의 <b>공고번호</b>를 드래그 복사(Ctrl+C)하신 후, <b>[국방조달이동]</b>을 눌러 뜨는 D2B 메인 검색창에 붙여넣기(Ctrl+V)하시면 1초 만에 조회가 가능합니다.
+        </div>
+        <hr style='border: 0; border-top: 1px solid #eee;'>
         
         <h3>1. 방위사업청 '위성' 관련 최신 입찰 공고 (최근 90일)</h3>
         {bid_html}
         
-        <hr>
+        <hr style='border: 0; border-top: 1px solid #eee;'>
         <h3>2. 오늘의 신안보 핵심 Intelligence 요약</h3>
         <ul>
             <li><b>K-팔란티어 육성 본격화:</b> 중기부·국방부·우주청 중심 10조 원 규모 미래전략기술 펀드 조성 및 한국형 인큐텔(IQT) 신설 추진 중</li>
