@@ -2,8 +2,14 @@ name: Daily Defense Tech Briefing
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # 매일 아침 9시 정각 자동 실행 (UTC 00:00 = KST 09:00)
-  workflow_dispatch:      # ⚡ 이 한 줄 덕분에 GitHub 화면에서 '즉시 실행' 버튼이 생깁니다!
+    - cron: '0 0 * * *'  # 매일 아침 9시 정각 자동 실행
+  workflow_dispatch:      # 수동 실행 시 입력창을 띄웁니다
+    inputs:
+      receiver_email:
+        description: '브리핑 메일을 받을 이메일 주소 (비워두면 기존 금고 설정 사용)'
+        required: false
+        default: ''
+        type: string
 
 jobs:
   run-briefing:
@@ -28,5 +34,6 @@ jobs:
         DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
         SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
         SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-        RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+        # 창에 입력한 주소가 있으면 그걸 쓰고, 비어있으면 Secrets 금고에 있는 주소를 씁니다.
+        RECEIVER_EMAIL: ${{ inputs.receiver_email || secrets.RECEIVER_EMAIL }}
       run: python defense_brief.py
