@@ -3,10 +3,10 @@ name: Daily Defense Tech Briefing
 on:
   schedule:
     - cron: '0 0 * * *'  # 매일 아침 9시 정각 자동 실행
-  workflow_dispatch:      # 수동 실행 시 입력창을 띄웁니다
+  workflow_dispatch:      # 수동 실행 시 입력창 호출
     inputs:
       receiver_email:
-        description: '브리핑 메일을 받을 이메일 주소 (비워두면 기존 금고 설정 사용)'
+        description: '메일 받을 주소들을 쉼표(,)로 구분해서 적어주세요. (예: aaa@com, bbb@com)'
         required: false
         default: ''
         type: string
@@ -34,6 +34,5 @@ jobs:
         DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
         SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
         SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-        # 창에 입력한 주소가 있으면 그걸 쓰고, 비어있으면 Secrets 금고에 있는 주소를 씁니다.
         RECEIVER_EMAIL: ${{ inputs.receiver_email || secrets.RECEIVER_EMAIL }}
       run: python defense_brief.py
