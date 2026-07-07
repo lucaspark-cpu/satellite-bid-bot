@@ -1,0 +1,27 @@
+name: G2B Satellite Bid Notice Bot
+
+on:
+  schedule:
+    # 💡 UTC 기준 0시 0분 = 한국 시간(KST) 오전 9시
+    # 1,2,3,4,5는 각각 월, 화, 수, 목, 금요일을 의미합니다. (평일 매일 실행)
+    - cron: '0 0 * * 1-5'
+  workflow_dispatch: # 언제든 수동으로 버튼을 눌러 실행해볼 수 있게 하는 옵션
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install requests
+
+      - name: Run G2B Bot Script
+        run: python g2b_bot.py
