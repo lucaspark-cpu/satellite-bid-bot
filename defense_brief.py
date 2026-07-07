@@ -38,36 +38,40 @@ def parse_bids_xml(xml_text):
         if not items:
             return "<p>최근 3개월간 '위성' 관련 국내 경쟁입찰공고가 없습니다.</p>"
         
-        html = "<table border='1' style='border-collapse:collapse; width:100%; text-align:left;'>"
-        html += "<tr style='background-color:#f2f2f2;'><th>공고명</th><th>공고기관</th><th>계약방식</th><th>개찰일시</th></tr>"
+        html = "<table border='1' style='border-collapse:collapse; width:100%; text-align:left; font-family:Arial, sans-serif; font-size:14px;'>"
+        html += "<tr style='background-color:#f2f2f2; height:35px;'><th>공고명</th><th>공고기관</th><th>계약방식</th><th>개찰일시</th><th>국방조달 바로가기</th></tr>"
+        
         for item in items:
             bid_nm = item.findtext('bidNm', 'N/A')
             ornt = item.findtext('ornt', 'N/A')
             cntrct_mth = item.findtext('cntrctMth', 'N/A')
             openg_dt = item.findtext('opengDt', 'N/A')
+            g2b_no = item.findtext('g2bPblancNo', '').strip() 
             
+            # ⭐ [링크 교정] 나라장터(G2B) 대신 국방전자조달(D2B) 메인 허브로 연결하도록 수정했습니다.
+            if g2b_no:
+                link_html = f"<a href='https://www.d2b.go.kr/' target='_blank' style='color:#0066cc; font-weight:bold; text-decoration:underline;'>국방조달이동<br><span style='font-size:11px; color:#555;'>({g2b_no})</span></a>"
+            else:
+                link_html = f"<a href='https://www.d2b.go.kr/' target='_blank' style='color:#0066cc; font-weight:bold; text-decoration:underline;'>국방조달이동</a>"
+
             if len(openg_dt) == 12:
                 openg_dt = f"{openg_dt[0:4]}-{openg_dt[4:6]}-{openg_dt[6:8]} {openg_dt[8:10]}:{openg_dt[10:12]}"
                 
-            html += f"<tr><td>{bid_nm}</td><td>{ornt}</td><td>{cntrct_mth}</td><td>{openg_dt}</td></tr>"
+            html += f"<tr style='height:40px;'><td>{bid_nm}</td><td>{ornt}</td><td>{cntrct_mth}</td><td>{openg_dt}</td><td>{link_html}</td></tr>"
         html += "</table>"
         return html
     except Exception as e:
         return f"<p style='color:red;'>XML 파싱 오류: {e}</p>"
 
 def send_email(bid_html):
-    # 💡 [교정] 깃허브 금고(Secrets) 및 yml에 설정된 SMTP_EMAIL 변수와 정확하게 매칭합니다.
     sender_email = os.environ.get("SMTP_EMAIL")
     sender_password = os.environ.get("SMTP_PASSWORD")
     
-    # 만약 환경변수가 비어있다면 알려주신 기본 발신 주소로 강제 세팅합니다.
     if not sender_email:
         sender_email = "lucas.park@dabeeo.com"
         
-    # 수동 실행 입력창 또는 Secrets 금고에서 수신자 데이터를 가져옵니다.
     raw_receiver = os.environ.get("RECEIVER_EMAIL", "").strip()
     
-    # 쉼표(,) 및 마스킹 특수문자(***) 제거 프로세스 가동
     receiver_list = []
     if raw_receiver:
         for email in raw_receiver.split(","):
@@ -75,7 +79,6 @@ def send_email(bid_html):
             if clean_email:
                 receiver_list.append(clean_email)
                 
-    # 💡 입력값이 없거나 누락되었을 때 Lucas님과 주현님이 기본 수신처가 되도록 확정합니다.
     if not receiver_list:
         receiver_list = ["lucas.park@dabeeo.com", "joohyeon.kim@dabeeo.com"]
         
@@ -114,7 +117,6 @@ def send_email(bid_html):
     with smtplib.SMTP(smtp_host, smtp_port) as server:
         server.starttls()
         server.login(sender_email, sender_password)
-        # 구글 SMTP 규격에 맞게 수신자 리스트를 넘겨 다중 발송 처리합니다.
         server.sendmail(sender_email, receiver_list, msg.as_string())
         
     print(f"✅ 공동 발송 완료! 수신처: {receiver_list}")
