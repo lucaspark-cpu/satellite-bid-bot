@@ -23,4 +23,4 @@ jobs:
           pip install requests
 
       - name: Run G2B Bot Script
-        run: python g2b_bot.py
+        run: python g2b_bot_gmail.py
