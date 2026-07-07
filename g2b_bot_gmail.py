@@ -89,7 +89,9 @@ total_count = len(final_items)
 
 # 5. 이메일 본문 생성 및 발송
 keyword_str = ", ".join(KEYWORDS)
-subject = f"📢 [나라장터] '{SEARCH_KEYWORD if isinstance(SEARCH_KEYWORD, str) else '위성/영상/분석'}' 관련 신규 입찰공고 리포트"
+
+# 💡 주석이나 마크다운 기호 없이 딱 아래 한 줄만 들어가야 합니다!
+subject = "📢 [나라장터] '위성/영상/분석' 관련 신규 입찰공고 리포트"
 
 if total_count > 0:
     html_content = f"""
