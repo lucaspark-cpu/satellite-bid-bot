@@ -24,12 +24,15 @@ API_URL = 'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancLi
 # 💡 튜플이 아닌 개별 키워드 리스트로 관리하여 루프를 돌립니다.
 KEYWORDS = ['위성', '영상', '분석']
 
-# 이메일 발송 함수
+# g2b_bot_gmail.py의 send_email 함수 부분을 아래 내용으로 교체
+
 def send_email(subject, content):
     try:
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
-        msg['To'] = RECEIVER_EMAIL
+        
+        # 1️⃣ 이메일 '화면'에 표시될 수신자 텍스트는 기존처럼 쉼표로 연결된 문자열을 씁니다.
+        msg['To'] = RECEIVER_EMAIL 
         msg['Subject'] = subject
         
         msg.attach(MIMEText(content, 'html', 'utf-8'))
@@ -37,7 +40,10 @@ def send_email(subject, content):
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.starttls()
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
+            
+            # 2️⃣ [핵심 수정] 구글 발송 함수에는 문자열이 아닌 원래의 '파이썬 리스트(RECEIVER_LIST)'를 그대로 넣어줍니다!
+            server.sendmail(SENDER_EMAIL, RECEIVER_LIST, msg.as_string())
+            
         print("✅ 이메일 발송 성공!")
     except Exception as e:
         print(f"❌ 이메일 발송 실패: {e}")
