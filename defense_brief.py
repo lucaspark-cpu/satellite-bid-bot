@@ -8,7 +8,6 @@ from email.mime.text import MIMEText
 import xml.etree.ElementTree as ET
 
 def get_defense_bids(service_key):
-    # 2026년 기준 현재 날짜 및 3개월 전 날짜 계산
     end_date = datetime.now().strftime("%Y%m%d")
     begin_date = (datetime.now() - timedelta(days=90)).strftime("%Y%m%d")
     
@@ -57,19 +56,22 @@ def send_email(bid_html):
     smtp_port = 587
     sender_email = os.environ.get("SMTP_EMAIL")
     sender_password = os.environ.get("SMTP_PASSWORD")
-    receiver_email = os.environ.get("RECEIVER_EMAIL", sender_email)
+    
+    # ⭐ [이 부분을 수정했습니다] Secrets가 비어있거나("") 설정 안됐을(None) 때 모두 발신인 주소로 안전하게 대체합니다.
+    receiver_email = os.environ.get("RECEIVER_EMAIL")
+    if not receiver_email: 
+        receiver_email = sender_email
     
     msg = MIMEMultipart('alternative')
     msg['Subject'] = f"🚀 [신안보 Intelligence] {datetime.now().strftime('%Y-%m-%d')} 일일 브리핑"
     msg['From'] = sender_email
     msg['To'] = receiver_email
     
-    # 신안보 핵심 트렌드 정보 요약 템플릿 포함
     html_body = f"""
     <html>
     <body>
         <h2>🛡️ 신안보 9시 테크-브리핑</h2>
-        <p>본 메일은 2026년 정부의 미래 신안보 혁신기업 육성 방향 및 글로벌 시장 동향을 반영한 자동화 브리핑입니다.</p>
+        <p>본 메일은 정부의 미래 신안보 혁신기업 육성 방향 및 글로벌 시장 동향을 반영한 자동화 브리핑입니다.</p>
         <hr>
         
         <h3>1. 방위사업청 '위성' 관련 최신 입찰 공고 (최근 90일)</h3>
@@ -83,7 +85,7 @@ def send_email(bid_html):
             <li><b>상업 위성 기술의 전장 활용:</b> AI 기반 위성 영상 분석(다비오의 어스아이, 중국 미자르비전 등)이 실시간 킬체인 단축의 핵심 열쇠로 작동</li>
         </ul>
         <br>
-        <p style='font-size:11px; color:gray;'>본 메일은 GitHub Actions를 통해 매일 오전 9시 정각에 자동 발송됩니다.</p>
+        <p style='font-size:11px; color:gray;'>본 메일은 GitHub Actions를 통해 자동 발송됩니다.</p>
     </body>
     </html>
     """
