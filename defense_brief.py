@@ -17,7 +17,7 @@ def get_defense_bids(service_key):
         f"https://apis.data.go.kr/1690000/BidPblancInfoService/{operation_name}"
         f"?serviceKey={service_key}"
         f"&pageNo=1"
-        f"&numOfRows=5"
+        f"&numOfRows=10"
         f"&opengDateBegin={begin_date}"
         f"&opengDateEnd={end_date}"
         f"&bidNm={keyword_encoded}"
@@ -43,31 +43,31 @@ def parse_bids_xml(xml_text):
         for item in items:
             bid_nm = item.findtext('bidNm', 'N/A')
             ornt = item.findtext('ornt', 'N/A')
-            cntrctMth = item.findtext('cntrctMth', 'N/A')
-            opengDt = item.findtext('opengDt', 'N/A')
+            cntrct_mth = item.findtext('cntrctMth', 'N/A')
+            openg_dt = item.findtext('opengDt', 'N/A')
             
-            # 날짜 포맷팅 (202603061030 -> 2026-03-06 10:30)
-            if len(opengDt) == 12:
-                opengDt = f"{opengDt[0:4]}-{opengDt[4:6]}-{opengDt[6:8]} {opengDt[8:10]}:{opengDt[10:12]}"
+            if len(openg_dt) == 12:
+                openg_dt = f"{openg_dt[0:4]}-{openg_dt[4:6]}-{openg_dt[6:8]} {openg_dt[8:10]}:{openg_dt[10:12]}"
                 
-            html += f"<tr><td>{bid_nm}</td><td>{ornt}</td><td>{cntrctMth}</td><td>{opengDt}</td></tr>"
+            html += f"<tr><td>{bid_nm}</td><td>{ornt}</td><td>{cntrct_mth}</td><td>{openg_dt}</td></tr>"
         html += "</table>"
         return html
     except Exception as e:
         return f"<p style='color:red;'>XML 파싱 오류: {e}</p>"
 
-def send_email(bi_html_content):
-    spreadsheet_id = os.environ.get('SPREADSHEET_ID') # 기존 전역변수 호출용 변환
-    sender_email = os.environ.get('TOKEN_REPAIR') # 본래 토큰 용도이나 예시 구조에 맞춤 (실제 구글 계정 ID 권장)
+def send_email(bid_html):
+    # 💡 [교정] 깃허브 금고(Secrets) 및 yml에 설정된 SMTP_EMAIL 변수와 정확하게 매칭합니다.
+    sender_email = os.environ.get("SMTP_EMAIL")
+    sender_password = os.environ.get("SMTP_PASSWORD")
     
-    # 만약 환경변수 세팅이 안 되어 있다면 본인 메일 주소를 기본값으로 안전장치
-    if not sender_email or "@" not in sender_email:
-        sender_email = "your_email@gmail.com" 
-
-    # 💡 [핵심 수정] 환경변수나 입력값에서 수신자 목록을 가져옵니다.
+    # 만약 환경변수가 비어있다면 알려주신 기본 발신 주소로 강제 세팅합니다.
+    if not sender_email:
+        sender_email = "lucas.park@dabeeo.com"
+        
+    # 수동 실행 입력창 또는 Secrets 금고에서 수신자 데이터를 가져옵니다.
     raw_receiver = os.environ.get("RECEIVER_EMAIL", "").strip()
     
-    # 쉼표(,)를 기준으로 쪼개고, 각 주소의 공백이나 기호(***)를 청소합니다.
+    # 쉼표(,) 및 마스킹 특수문자(***) 제거 프로세스 가동
     receiver_list = []
     if raw_receiver:
         for email in raw_receiver.split(","):
@@ -75,18 +75,17 @@ def send_email(bi_html_content):
             if clean_email:
                 receiver_list.append(clean_email)
                 
-    # 만약 입력된 수신자가 하나도 없다면 나 자신에게 보냅니다.
+    # 💡 입력값이 없거나 누락되었을 때 Lucas님과 주현님이 기본 수신처가 되도록 확정합니다.
     if not receiver_list:
-        receiver_list = [sender_email]
+        receiver_list = ["lucas.park@dabeeo.com", "joohyeon.kim@dabeeo.com"]
         
     smtp_host = "smtp.gmail.com"
     smtp_port = 587
-    sender_password = os.environ.get("SMTP_PASSWORD")
     
     msg = MIMEMultipart('alternative')
     msg['Subject'] = f"🚀 [신안보 Intelligence] {datetime.now().strftime('%Y-%m-%d')} 일일 공동 브리핑"
     msg['From'] = sender_email
-    msg['To'] = ", ".join(receiver_list) # 메일 헤더에는 "aaa@com, bbb@com" 형태의 문자열로 입력
+    msg['To'] = ", ".join(receiver_list)
     
     html_body = f"""
     <html>
@@ -96,7 +95,7 @@ def send_email(bi_html_content):
         <hr>
         
         <h3>1. 방위사업청 '위성' 관련 최신 입찰 공고 (최근 90일)</h3>
-        {bi_html_content}
+        {bid_html}
         
         <hr>
         <h3>2. 오늘의 신안보 핵심 Intelligence 요약</h3>
@@ -110,16 +109,15 @@ def send_email(bi_html_content):
     </body>
     </html>
     """
-    
     msg.attach(MIMEText(html_body, 'html'))
     
     with smtplib.SMTP(smtp_host, smtp_port) as server:
         server.starttls()
         server.login(sender_email, sender_password)
-        # 💡 [핵심 수정] 구글 서버에는 수신자 '리스트'를 그대로 넘겨주어야 동시 발송됩니다.
+        # 구글 SMTP 규격에 맞게 수신자 리스트를 넘겨 다중 발송 처리합니다.
         server.sendmail(sender_email, receiver_list, msg.as_string())
         
-    print(f"✅ 동시 발송 완료! 대상자 목록: {receiver_list}")
+    print(f"✅ 공동 발송 완료! 수신처: {receiver_list}")
 
 if __name__ == "__main__":
     api_key = os.environ.get("DATA_GO_KR_API_KEY")
