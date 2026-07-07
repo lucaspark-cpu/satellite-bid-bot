@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 # 1. 이메일 발송 설정 정보 (★ 본인 정보로 채워 넣으세요)
 SENDER_EMAIL = 'lucas.park@dabeeo.com'
 SENDER_PASSWORD = 'yxph vbqx puco byut' # 공백 없이 입력
-RECEIVER_EMAIL = 'lucas.park@dabeeo.com'
+RECEIVER_EMAIL = 'lucas.park@dabeeo.com, joohyeon.kim@dabeeo.com'
 
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
 SEARCH_KEYWORD = '위성', '영상', '분석'
