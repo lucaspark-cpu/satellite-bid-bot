@@ -2,8 +2,10 @@ name: G2B Satellite Bid Notice Bot
 
 on:
   schedule:
-    # 평일 매일 한국 시간(KST) 오전 9시에 정기 실행 (UTC 기준 0시 0분)
+    # 1️⃣ 평일(월~금) 매일 한국 시간(KST) 오전 9시에 정기 실행 (UTC 기준 0시 0분)
     - cron: '0 0 * * 1-5'
+  
+  # 2️⃣ [핵심] 이 옵션이 들어가면 깃허브 화면에 '즉시 실행' 버튼이 생겨납니다!
   workflow_dispatch: 
 
 jobs:
@@ -11,10 +13,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4 # 💡 @v3에서 @v4로 업데이트
+        uses: actions/checkout@v4.1.7 # 💡 Node.js 24 경고를 없애기 위해 마이너 버전까지 최신화
 
       - name: Set up Python
-        uses: actions/setup-python@v5 # 💡 @v4에서 @v5로 업데이트
+        uses: actions/setup-python@v5.1.1 # 💡 Node.js 24 경고를 없애기 위해 마이너 버전까지 최신화
         with:
           python-version: '3.10'
 
