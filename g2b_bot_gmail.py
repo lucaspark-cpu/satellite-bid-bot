@@ -1,18 +1,26 @@
-# g2b_bot.py
+# g2b_bot_gmail.py
 import requests
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 
-# 1. 이메일 발송 설정 정보 (★ 본인 정보로 채워 넣으세요)
+# 1. 이메일 발송 설정 정보
 SENDER_EMAIL = 'lucas.park@dabeeo.com'
-SENDER_PASSWORD = 'yxph vbqx puco byut' # 공백 없이 입력
-RECEIVER_EMAIL = 'lucas.park@dabeeo.com, joohyeon.kim@dabeeo.com'
+SENDER_PASSWORD = 'yxphvbqxpucobyut'  # 💡 구글 앱 비밀번호 공백 완전히 제거
+RECEIVER_EMAIL = [
+    'lucas.park@dabeeo.com',
+    'joohyeon.kim@dabeeo.com'
+]
+
+# 💡 파이썬이 인식할 수 있도록 쉼표(,)로 연결된 하나의 문자열로 자동 변환합니다.
+RECEIVER_EMAIL = ", ".join(RECEIVER_LIST)
 
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
-SEARCH_KEYWORD = '위성', '영상', '분석'
 API_URL = 'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch'
+
+# 💡 튜플이 아닌 개별 키워드 리스트로 관리하여 루프를 돌립니다.
+KEYWORDS = ['위성', '영상', '분석']
 
 # 이메일 발송 함수
 def send_email(subject, content):
@@ -22,12 +30,10 @@ def send_email(subject, content):
         msg['To'] = RECEIVER_EMAIL
         msg['Subject'] = subject
         
-        # HTML 형식으로 이메일 본문 작성 (이메일이 훨씬 깔끔하게 보입니다)
         msg.attach(MIMEText(content, 'html', 'utf-8'))
         
-        # 지메일 SMTP 서버 연결
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
-            server.starttls() # 보안 연결
+            server.starttls()
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             server.sendmail(SENDER_EMAIL, RECEIVER_EMAIL, msg.as_string())
         print("✅ 이메일 발송 성공!")
@@ -40,53 +46,71 @@ seven_days_ago = today - timedelta(days=7)
 inqry_bgn_dt = seven_days_ago.strftime('%Y%m%d0000')
 inqry_end_dt = today.strftime('%Y%m%d2359')
 
-params = {
-    'ServiceKey': SERVICE_KEY,
-    'type': 'json',               
-    'numOfRows': '50',            
-    'pageNo': '1',                
-    'inqryDiv': '1',              
-    'inqryBgnDt': inqry_bgn_dt,   
-    'inqryEndDt': inqry_end_dt,   
-    'bidNtceNm': SEARCH_KEYWORD,  
-    'bidClseExcpYn': 'Y'          
-}
+# 3. 키워드별 순회 검색 및 중복 제거 로직
+unique_items = {} # 공고번호(bidNtceNo)를 key로 사용하여 중복 제거
 
-response = requests.get(API_URL, params=params)
-
-if response.status_code == 200:
-    data = response.json()
-    try:
-        total_count = data['response']['body']['totalCount']
-        items = data['response']['body']['items']
-        items = sorted(items, key=lambda x: x.get('bidNtceDt', ''), reverse=True)
-        
-        # 이메일 제목 및 HTML 본문 디자인 구성
-        subject = f"📢 [나라장터] '{SEARCH_KEYWORD}' 관련 신규 입찰공고 리포트"
-        
-        html_content = f"""
-        <html>
-        <body>
-            <h2>🚀 나라장터 [{SEARCH_KEYWORD}] 관련 신규 용역 공고</h2>
-            <p>최근 일주일간 등록된 진행 중인 공고가 총 <b>{total_count}건</b> 검색되었습니다.</p>
-            <hr>
-        """
-        
-        for idx, item in enumerate(items, 1):
-            html_content += f"""
-            <div style='margin-bottom: 20px; padding: 10px; border-left: 4px solid #3498db; background-f9f9f9;'>
-                <h3 style='margin: 0 0 10px 0; color: #2c3e50;'>{idx}. {item.get('bidNtceNm', '공고명 없음')}</h3>
-                <p style='margin: 5px 0;'><b>🔹 수요기관:</b> {item.get('dminsttNm', '-')}</p>
-                <p style='margin: 5px 0;'><b>🔹 공고일시:</b> {item.get('bidNtceDt', '-')}</p>
-                <p style='margin: 5px 0;'><b>🔹 마감일시:</b> <span style='color: #e74c3c;'>{item.get('bidClseDt', '-')}</span></p>
-                <p style='margin: 10px 0 0 0;'><a href='{item.get('bidNtceUrl', '-')}' target='_blank' style='background-color: #3498db; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px;'>공고 상세 보기</a></p>
-            </div>
-            """
+for keyword in KEYWORDS:
+    params = {
+        'ServiceKey': SERVICE_KEY,
+        'type': 'json',               
+        'numOfRows': '50',            
+        'pageNo': '1',                
+        'inqryDiv': '1',              
+        'inqryBgnDt': inqry_bgn_dt,   
+        'inqryEndDt': inqry_end_dt,   
+        'bidNtceNm': keyword,         # 개별 키워드 순차 대입
+        'bidClseExcpYn': 'Y'          
+    }
+    
+    response = requests.get(API_URL, params=params)
+    
+    if response.status_code == 200:
+        try:
+            data = response.json()
+            items = data['response']['body']['items']
             
-        html_content += "</body></html>"
-        send_email(subject, html_content)
-        
-    except KeyError:
-        subject = f"ℹ️ [나라장터] '{SEARCH_KEYWORD}' 관련 신규 공고 없음"
-        html_content = f"<h3>최근 일주일 내에 등록된 '{SEARCH_KEYWORD}' 관련 신규 용역 공고가 없습니다.</h3>"
-        send_email(subject, html_content)
+            # 리스트 데이터가 한 건일 경우 딕셔너리로 반환되는 예외 대응
+            if isinstance(items, dict):
+                items = [items]
+                
+            for item in items:
+                notice_no = item.get('bidNtceNo')
+                if notice_no:
+                    unique_items[notice_no] = item # 중복된 공고는 덮어씌워져 1건만 남음
+        except KeyError:
+            continue
+
+# 4. 결과 통합 및 정렬
+final_items = list(unique_items.values())
+final_items = sorted(final_items, key=lambda x: x.get('bidNtceDt', ''), reverse=True)
+total_count = len(final_items)
+
+# 5. 이메일 본문 생성 및 발송
+keyword_str = ", ".join(KEYWORDS)
+subject = f"📢 [나라장터] '{SEARCH_KEYWORD if isinstance(SEARCH_KEYWORD, str) else '위성/영상/분석'}' 관련 신규 입찰공고 리포트"
+
+if total_count > 0:
+    html_content = f"""
+    <html>
+    <body>
+        <h2>🚀 나라장터 검색 알림 (검색어: {keyword_str})</h2>
+        <p>최근 일주일간 등록된 진행 중인 공고가 중복 없이 총 <b>{total_count}건</b> 검색되었습니다.</p>
+        <hr>
+    """
+    
+    for idx, item in enumerate(final_items, 1):
+        # 💡 background 문법 오류 수정 완료
+        html_content += f"""
+        <div style='margin-bottom: 20px; padding: 10px; border-left: 4px solid #3498db; background-color: #f9f9f9;'>
+            <h3 style='margin: 0 0 10px 0; color: #2c3e50;'>{idx}. {item.get('bidNtceNm', '공고명 없음')}</h3>
+            <p style='margin: 5px 0;'><b>🔹 수요기관:</b> {item.get('dminsttNm', '-')}</p>
+            <p style='margin: 5px 0;'><b>🔹 공고일시:</b> {item.get('bidNtceDt', '-')}</p>
+            <p style='margin: 5px 0;'><b>🔹 마감일시:</b> <span style='color: #e74c3c;'>{item.get('bidClseDt', '-')}</span></p>
+            <p style='margin: 10px 0 0 0;'><a href='{item.get('bidNtceUrl', '-')}' target='_blank' style='background-color: #3498db; color: white; padding: 5px 10px; text-decoration: none; border-radius: 3px;'>공고 상세 보기</a></p>
+        </div>
+        """
+    html_content += "</body></html>"
+else:
+    html_content = f"<h3>최근 일주일 내에 등록된 '{keyword_str}' 관련 신규 용역 공고가 없습니다.</h3>"
+
+send_email(subject, html_content)
