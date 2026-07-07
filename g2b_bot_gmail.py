@@ -6,12 +6,12 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta
 
 # 1. 이메일 발송 설정 정보 (★ 본인 정보로 채워 넣으세요)
-SENDER_EMAIL = '보내는_사람_지메일_주소@gmail.com'
-SENDER_PASSWORD = '1단계에서_발급받은_16자리_앱_비밀번호_입력' # 공백 없이 입력
-RECEIVER_EMAIL = '받을_사람_이메일_주소(회사_이메일_등)'
+SENDER_EMAIL = 'lucas.park@dabeeo.com'
+SENDER_PASSWORD = 'yxph vbqx puco byut' # 공백 없이 입력
+RECEIVER_EMAIL = 'lucas.park@dabeeo.com'
 
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
-SEARCH_KEYWORD = '위성'
+SEARCH_KEYWORD = '위성', '영상', '분석'
 API_URL = 'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch'
 
 # 이메일 발송 함수
