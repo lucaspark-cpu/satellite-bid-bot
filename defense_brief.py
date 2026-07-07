@@ -57,8 +57,8 @@ def send_email(bid_html):
     sender_email = os.environ.get("SMTP_EMAIL")
     sender_password = os.environ.get("SMTP_PASSWORD")
     
-    # ⭐ [이 부분을 수정했습니다] Secrets가 비어있거나("") 설정 안됐을(None) 때 모두 발신인 주소로 안전하게 대체합니다.
-    receiver_email = os.environ.get("RECEIVER_EMAIL")
+    # 공백이나 빈 문자열을 확실하게 제거하고 체크합니다.
+    receiver_email = os.environ.get("RECEIVER_EMAIL", "").strip()
     if not receiver_email: 
         receiver_email = sender_email
     
@@ -82,7 +82,7 @@ def send_email(bid_html):
         <ul>
             <li><b>K-팔란티어 육성 본격화:</b> 중기부·국방부·우주청 중심 10조 원 규모 미래전략기술 펀드 조성 및 한국형 인큐텔(IQT) 신설 추진 중</li>
             <li><b>소프트웨어 정의 전장(Software-defined Warfare):</b> 미국 안두릴(Anduril)의 래티스 OS, 팔란티어 AIP 등 AI 기반 의사결정체계가 핵심 Moat로 부상</li>
-            <li><b>상업 위성 기술의 전장 활용:</b> AI 기반 위성 영상 분석(다비오의 어스아이, 중국 미자르비전 등)이 실시간 킬체인 단축의 핵심 열쇠로 작동</li>
+            <li><b>상업 위성 기술의 전장 활용:</b> AI 기반 위성 영상 분석(다비오의 어스아이, 중국 미자르비전 등)이 실시간 킬체인 단축의 핵심 얼쇠로 작동</li>
         </ul>
         <br>
         <p style='font-size:11px; color:gray;'>본 메일은 GitHub Actions를 통해 자동 발송됩니다.</p>
@@ -96,7 +96,7 @@ def send_email(bid_html):
         server.starttls()
         server.login(sender_email, sender_password)
         server.sendmail(sender_email, receiver_email, msg.as_string())
-    print("✅ 이메일 발송 완료!")
+    print(f"✅ {receiver_email} 주소로 이메일 발송 완료!")
 
 if __name__ == "__main__":
     api_key = os.environ.get("DATA_GO_KR_API_KEY")
