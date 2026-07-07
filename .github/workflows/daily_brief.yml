@@ -2,8 +2,8 @@ name: Daily Defense Tech Briefing
 
 on:
   schedule:
-    - cron: '0 0 * * *'  # UTC 00:00 = KST 09:00 (매일 아침 9시 정각)
-  workflow_dispatch:      # 필요할 때 수동으로 즉시 실행할 수 있는 버튼 추가
+    - cron: '0 0 * * *'  # 매일 아침 9시 정각 자동 실행 (UTC 00:00 = KST 09:00)
+  workflow_dispatch:      # ⚡ 이 한 줄 덕분에 GitHub 화면에서 '즉시 실행' 버튼이 생깁니다!
 
 jobs:
   run-briefing:
@@ -16,7 +16,7 @@ jobs:
     - name: Python 환경 설정
       uses: actions/setup-python@v5
       with:
-        python-python-version: '3.10'
+        python-version: '3.10'
 
     - name: 필수 라이브러리 설치
       run: |
@@ -28,5 +28,5 @@ jobs:
         DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
         SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
         SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-        RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }} # 생략 시 발신 이메일로 자동 전송
+        RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
       run: python defense_brief.py
