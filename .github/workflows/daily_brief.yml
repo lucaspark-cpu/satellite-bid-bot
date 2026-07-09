@@ -1,8 +1,9 @@
 name: Daily Defense Tech Briefing
 
 on:
-  schedule:
-    - cron: '0 0 * * *'  # 매일 아침 9시 정각 자동 실행
+schedule:
+    - cron: '30 23 * * 0-4'  
+    # 일~목요일 지중 23:30 (KST 기준 월~금요일 아침 08:30) 분산 트래픽을 고려한 조기 기동
   workflow_dispatch:      # 수동 실행 시 입력창 호출
     inputs:
       receiver_email:
