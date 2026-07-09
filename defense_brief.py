@@ -71,7 +71,7 @@ def get_defense_bids(service_key):
     # 명세서 기반 유효 오퍼레이션 엔드포인트 정의 (시설 공사 원천 배제)
     endpoints = [
         "getDmstcCmpetBidPblancList",      # 1. 국내 경쟁입찰공고 목록
-        "getDmstcOthbcVltrnNtatPlanList"   # 2. 국내 공개수의협상계획 목록 (★ 수의계약 누락 방지 핵심)
+        "getDmstcOthbcVltrnNtatPlanList"   # 2. 국내 공개수의협상계획 목록
     ]
     
     search_keywords = ["위성", "영상", "드론", "AI", "공간정보", "활용방안"]
@@ -107,15 +107,13 @@ def get_defense_bids(service_key):
                             try:
                                 clse_dt = datetime.strptime(clse_dt_str[:12], "%Y%m%d%H%M")
                                 if current_time > clse_dt:
-                                    continue # 마감된 공고는 가차 없이 패스
+                                    continue # 마감된 공고는 패스
                             except Exception:
                                 pass
                         
-                        # 고유 식별값 지정
                         bid_id = g2b_no if g2b_no else bid_nm
                         
                         if bid_id not in raw_bids:
-                            # 경쟁입찰과 수의협상 UI 태그 분화
                             source_tag = "공개수의" if "OthbcVltrn" in operation else "경쟁입찰"
                             raw_bids[bid_id] = {
                                 'bidNm': bid_nm,
@@ -129,7 +127,7 @@ def get_defense_bids(service_key):
                 print(f"D2B API 융합 에러 [{operation}]: {e}")
 
     # ==========================================
-    # 4. 알고리즘 분류 엔진 기동
+    # 4. 알고리즘 스크리닝 및 결과 통합
     # ==========================================
     categorized_bids = {"상 (핵심 타겟) 🎯": [], "중 (검토 권장) 🔍": [], "하 (단순 키워드) 💡": []}
     
@@ -142,10 +140,31 @@ def get_defense_bids(service_key):
 
 def generate_html_report(categorized_bids):
     total_valid = sum(len(bids) for bids in categorized_bids.values())
-    if total_valid == 0:
-        return "<p>현재 D2B 시스템에 등록된 진행 중인(미마감) 유효 공고가 없습니다.</p>"
+    
+    # 💡 이메일 본문 최상단에 들어갈 "친절한 소개글(가이드)" 영역입니다.
+    html = f"""
+    <html>
+    <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
+        <h2 style='color: #2c3e50;'>🛡️ 다비오(Dabeeo) 맞춤형 신안보 인텔리전스 리포트</h2>
+        
+        <p>안녕하세요, 본 메일은 국방전자조달시스템(D2B)의 방대한 공고 중 <b>다비오의 비즈니스 모델에 최적화된 핵심 사업 기회</b>만을 선별하여 제공하는 <b>자동화 브리핑</b>입니다.</p>
+        
+        <div style='background-color: #f1f8ff; padding: 18px; border-radius: 8px; font-size: 13px; margin-bottom: 25px; border: 1px solid #d0e2f3;'>
+            <h4 style='margin-top: 0; margin-bottom: 12px; color: #0056b3; font-size: 14px;'>🔍 리포트 데이터 수집 및 가공 기준</h4>
+            <ul style='margin: 0; padding-left: 20px; color: #444;'>
+                <li style='margin-bottom: 8px;'><b>수집 범위:</b> 최근 45일간 발주된 국방/방사청 전체 공고 (경쟁입찰 및 <b>공개수의협상</b> 포함)</li>
+                <li style='margin-bottom: 8px;'><b>실시간 마감 필터링:</b> 발송 시점 기준, 입찰 참가 등록이 <b>이미 마감된 공고는 100% 자동 제외</b>하여 유효한 기회만 전달합니다.</li>
+                <li style='margin-bottom: 8px;'><b>스마트 노이즈 제거:</b> 단순 제조, 하드웨어 부품, 설비 및 일반 공사 관련 사업은 네거티브 알고리즘이 원천 차단합니다.</li>
+                <li style='margin-bottom: 4px;'><b>다비오 맞춤 스코어링:</b> 영상, 공간정보, AI, 소프트웨어 등 자사 핵심 역량 키워드에 가중치를 부여해 <b>상/중/하(🎯/🔍/💡)</b> 등급으로 판정합니다.</li>
+            </ul>
+        </div>
+    """
 
-    html = ""
+    if total_valid == 0:
+        html += "<p><b>현재 D2B 시스템에 등록된 진행 중인(미마감) 유효 공고가 없습니다.</b></p></body></html>"
+        return html
+
+    # 등급별 리스트 출력
     for grade in ["상 (핵심 타겟) 🎯", "중 (검토 권장) 🔍", "하 (단순 키워드) 💡"]:
         bids = categorized_bids[grade]
         if not bids:
@@ -158,24 +177,31 @@ def generate_html_report(categorized_bids):
             g2b_no = item['g2bPblancNo']
             clse_str = item['clseDt']
             
-            # 마감 일시 가독성 변환 (YYYY-MM-DD HH:MM)
             if clse_str and len(clse_str) >= 12:
                 formatted_clse = f"{clse_str[0:4]}-{clse_str[4:6]}-{clse_str[6:8]} {clse_str[8:10]}:{clse_str[10:12]}"
             else:
                 formatted_clse = clse_str
                 
             html += f"""
-            <div style='margin-bottom: 15px; padding: 12px; border-left: 4px solid {color}; background-color: #f9f9f9;'>
-                <h4 style='margin: 0 0 8px 0; color: #2c3e50;'>
-                    <span style='background-color:#7f8c8d; color:white; padding:1px 5px; font-size:11px; border-radius:3px; vertical-align:middle;'>{item['source_tag']}</span>
+            <div style='margin-bottom: 15px; padding: 12px; border-left: 4px solid {color}; background-color: #f9f9f9; border-radius: 0 5px 5px 0;'>
+                <h4 style='margin: 0 0 8px 0; color: #2c3e50; font-size: 15px;'>
+                    <span style='background-color:#7f8c8d; color:white; padding:2px 6px; font-size:11px; border-radius:3px; vertical-align:middle; margin-right: 5px;'>{item['source_tag']}</span>
                     {item['bidNm']}
                 </h4>
                 <p style='margin: 4px 0; font-size:13px;'><b>🔹 발주기관:</b> {item['ornt']} | <b>계약방식:</b> {item['cntrctMth']}</p>
                 <p style='margin: 4px 0; font-size:13px;'><b>🔹 등록마감일시:</b> <span style='color:#e74c3c; font-weight:bold;'>{formatted_clse}</span></p>
                 <p style='margin: 4px 0; font-size:13px;'><b>🔹 검색용 공고번호:</b> <b>{g2b_no}</b></p>
-                <p style='margin: 8px 0 0 0;'><a href='https://www.d2b.go.kr/' target='_blank' style='background-color: {color}; color: white; padding: 4px 8px; text-decoration: none; border-radius: 3px; font-size:12px;'>D2B 시스템에서 검색하기</a></p>
+                <p style='margin: 12px 0 0 0;'><a href='https://www.d2b.go.kr/' target='_blank' style='background-color: {color}; color: white; padding: 6px 12px; text-decoration: none; border-radius: 4px; font-size:12px; font-weight: bold;'>D2B 시스템에서 검색하기</a></p>
             </div>
             """
+            
+    html += """
+        <br>
+        <hr style='border: 0; border-top: 1px solid #ddd; margin-top: 30px;'>
+        <p style='font-size:11px; color:#888; text-align: center;'>본 메일은 Dabeeo 스크리닝 알고리즘에 의해 자동 분석 및 독립 발송되었습니다.</p>
+    </body>
+    </html>
+    """
     return html
 
 if __name__ == "__main__":
