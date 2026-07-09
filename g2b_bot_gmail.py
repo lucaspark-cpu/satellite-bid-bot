@@ -26,7 +26,7 @@ API_ENDPOINTS = {
     '물품': 'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoThngPPSSrch'
 }
 
-KEYWORDS = ['위성', '영상', '분석', '공간정보']
+KEYWORDS = ['위성', '영상', '공간정보']
 
 # 다비오 맞춤형 필터링 키워드 셋팅 (제조/설비/생산 원천 배제)
 NEGATIVE_KEYWORDS = ["제조설비", "공장생산", "공장등록", "단순제조", "탑재체", "부품", "수리", "정비", "기체", "배터리", "하드웨어", "조경", "폐기물", "청소", "구매"]
