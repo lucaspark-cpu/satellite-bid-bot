@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 # ==========================================
 # 1. 시스템 통합 글로벌 설정
 # ==========================================
-RECEIVERS = ['lucas.park@dabeeo.com', 'joohyeon.kim@dabeeo.com']
+RECEIVERS = ['lucas.park@dabeeo.com']
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
 
 SENDER_EMAIL = os.environ.get("SMTP_EMAIL", "lucas.park@dabeeo.com")
@@ -62,7 +62,7 @@ def evaluate_bid_grade(title):
     # 등급 판정 로직
     if score >= 50:
         # 상 등급 진입 허들: 위성, 드론, 공간정보 셋 중 하나 필수
-        if any(k in title for k in ["위성", "드론", "공간정보"]):
+        if any(k in title for k in ["위성", "드론", "AI"]):
             return score, "상 (핵심 타겟) 🎯"
         else:
             return score, "중 (검토 권장) 🔍"
