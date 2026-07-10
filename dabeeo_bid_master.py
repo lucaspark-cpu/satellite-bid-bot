@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 # 1. 시스템 통합 글로벌 설정
 # ==========================================
 # 수신자 이메일 명단 일원화 (To 창에 한 번에 노출되어 동시 발송됨)
-RECEIVERS = ['lucas.park@dabeeo.com', 'joohyeon.kim@dabeeo.com']
+RECEIVERS = ['lucas.park@dabeeo.com']
 
 # 공공데이터포털 API 서비스 키 설정
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
