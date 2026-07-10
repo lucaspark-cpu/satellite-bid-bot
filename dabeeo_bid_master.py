@@ -10,7 +10,6 @@ import xml.etree.ElementTree as ET
 # ==========================================
 # 1. 시스템 통합 글로벌 설정
 # ==========================================
-# 💡 수신자 리스트 정의 (수정 완료)
 RECEIVERS = ['lucas.park@dabeeo.com']
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
 
@@ -26,8 +25,8 @@ D2B_ENDPOINTS = {
     '공개수의': 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcOthbcVltrnNtatPlanList'
 }
 
-# 💡 목표 공고를 포착하기 위해 키워드 풀 확장 유지
-KEYWORDS = ['위성', '영상', '공간정보', 'AI', '드론', '활용방안']
+# 검색 조회를 위한 풀 (그대로 유지)
+KEYWORDS = ['위성', '공간정보', 'AI', '드론', '영상']
 
 # ==========================================
 # 2. 다비오 고도화 스코어링
@@ -35,11 +34,17 @@ KEYWORDS = ['위성', '영상', '공간정보', 'AI', '드론', '활용방안']
 NEGATIVE_KEYWORDS = [
     "장치", "기념", "콘텐츠", "설치", "문화", "의료", "홍보", "방송", "초음파", "여행", 
     "시설", "의학", "드라마", "스포츠", "자막", "행사", "제조설비", "공장생산", "공장등록", 
-    "단순제조", "탑재체", "부품", "수리", "정비", "기체", "배터리", "하드웨어", "청소", "폐기물", "구매"
+    "단순제조", "탑재체", "부품", "수리", "정비", "기체", "배터리", "하드웨어", "청소", "폐기물", "구매",
+    # 새로 추가된 강력한 네거티브 키워드
+    "제조", "애니메이션", "LLM", "로봇", "영화", "임차", "공사", "강수량", "인재", "대학교", 
+    "상품", "반도체", "서버", "냉방기", "장비", "학생", "골프장", "월드컵", "주파수", "학년도", 
+    "가이드", "교육", "섬유", "약물", "진료", "파일럿", "음악", "기자재", "음료", "상담"
 ]
 
-HIGH_WEIGHT_KEYWORDS = ["영상", "분석", "AI", "인공지능", "공간정보", "알고리즘", "플랫폼", "소프트웨어", "SW", "디지털트윈", "데이터", "정제", "무인", "관측", "해양", "검보정"]
-MID_WEIGHT_KEYWORDS = ["위성", "상용위성", "드론", "무인기", "정찰", "감시", "시스템", "활용방안", "연구", "정보", "구축"]
+# '해양' 제거 (MID로 이동)
+HIGH_WEIGHT_KEYWORDS = ["영상", "분석", "AI", "인공지능", "공간정보", "알고리즘", "플랫폼", "소프트웨어", "SW", "디지털트윈", "데이터", "정제", "무인", "관측", "검보정"]
+# '해양' 추가, '연구', '활용방안' 가중치 제거 (단순 키워드로만 둠)
+MID_WEIGHT_KEYWORDS = ["위성", "상용위성", "드론", "무인기", "정찰", "감시", "시스템", "정보", "구축", "해양"]
 
 def evaluate_bid_grade(title):
     clean_title = title.replace(" ", "")
@@ -56,8 +61,8 @@ def evaluate_bid_grade(title):
     # 국방/위성 특화 복합 키워드 시너지 가점
     if "위성" in title and ("영상" in title or "데이터" in title or "검보정" in title or "활용" in title):
         score += 15
-    if "무인" in title and ("관측" in title or "해양" in title):
-        score += 15
+        
+    # 무인 if 문은 요청에 따라 제거됨
 
     if score >= 50:
         return score, "상 (핵심 타겟) 🎯"
@@ -220,7 +225,6 @@ def build_html_and_dispatch():
             server.starttls()
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             
-            # 💡 [핵심 수정] RECEIVER_LIST가 아닌 RECEIVERS로 참조하도록 수정 완료
             for receiver in RECEIVERS:
                 msg = MIMEMultipart()
                 msg['From'] = SENDER_EMAIL
