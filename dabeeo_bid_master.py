@@ -11,7 +11,6 @@ import xml.etree.ElementTree as ET
 # ==========================================
 # 1. 시스템 통합 글로벌 설정
 # ==========================================
-# 💡 수신처 리스트 통일 (To 창에 한 번에 묶여서 단일 발송됨)
 RECEIVERS = ['lucas.park@dabeeo.com']
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
 
@@ -22,6 +21,7 @@ G2B_ENDPOINTS = {
     '용역': 'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch',
     '물품': 'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoThngPPSSrch'
 }
+# 담당자님 원본 코드 엔드포인트 그대로 복원
 D2B_ENDPOINTS = {
     '경쟁입찰': 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcCmpetBidPblancList',
     '공개수의': 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcOthbcVltrnNtatPlanList'
@@ -30,41 +30,34 @@ D2B_ENDPOINTS = {
 KEYWORDS = ['위성', '영상', '공간정보']
 
 # ==========================================
-# 2. 다비오 고도화 스코어링 & 네거티브 필터링
+# 2. 다비오 고도화 스코어링
 # ==========================================
-# 💡 [요청 반영] 불필요한 사업을 원천 차단하기 위한 네거티브 키워드 대폭 확장
 NEGATIVE_KEYWORDS = [
     "장치", "기념", "콘텐츠", "설치", "문화", "의료", "홍보", "방송", "초음파", "여행", 
     "시설", "의학", "드라마", "스포츠", "자막", "행사", "제조설비", "공장생산", "공장등록", 
     "단순제조", "탑재체", "부품", "수리", "정비", "기체", "배터리", "하드웨어", "청소", "폐기물", "구매"
 ]
 
-# 💡 [요청 반영] 다비오 핵심 사업(무인, 관측, 해양 등)을 무조건 상으로 올리는 가중치
 HIGH_WEIGHT_KEYWORDS = ["영상", "분석", "AI", "인공지능", "공간정보", "알고리즘", "플랫폼", "소프트웨어", "SW", "디지털트윈", "데이터", "정제", "무인", "관측", "해양", "검보정"]
 MID_WEIGHT_KEYWORDS = ["위성", "드론", "무인기", "정찰", "감시", "시스템", "활용방안", "연구", "정보", "구축"]
 
 def evaluate_bid_grade(title):
     clean_title = title.replace(" ", "")
-    
-    # 1. 강력한 네거티브 필터 (원본 텍스트 및 공백 제거 텍스트 교차 검증)
     for nk in NEGATIVE_KEYWORDS:
         if nk in title or nk in clean_title:
             return -1, "제외"
 
     score = 0
-    # 2. 가중치 점수 합산
     for hk in HIGH_WEIGHT_KEYWORDS:
         if hk in title: score += 30
     for mk in MID_WEIGHT_KEYWORDS:
         if mk in title: score += 15
 
-    # 3. 도메인 복합 시너지 보너스 (압도적 변별력)
     if "위성" in title and ("영상" in title or "데이터" in title or "검보정" in title):
         score += 15
     if "무인" in title and ("관측" in title or "해양" in title):
         score += 15
 
-    # 4. 등급 판정
     if score >= 50:
         return score, "상 (핵심 타겟) 🎯"
     elif score >= 20:
@@ -73,7 +66,7 @@ def evaluate_bid_grade(title):
         return score, "하 (단순 키워드) 💡"
 
 # ==========================================
-# 3. 데이터 융합 엔진 (D2B 누락 버그 완벽 해결)
+# 3. 데이터 융합 엔진 (담당자님 원본 D2B 로직으로 복원)
 # ==========================================
 def collect_and_fuse_bids():
     kst_now = datetime.utcnow() + timedelta(hours=9)
@@ -81,10 +74,6 @@ def collect_and_fuse_bids():
     
     g2b_start = seven_days_ago.strftime('%Y%m%d0000')
     g2b_end = kst_now.strftime('%Y%m%d2359')
-    
-    # D2B 전용 날짜 포맷 (YYYYMMDD)
-    d2b_date_start = seven_days_ago.strftime('%Y%m%d')
-    d2b_date_end = kst_now.strftime('%Y%m%d')
 
     master_container = {
         "상 (핵심 타겟) 🎯": {},
@@ -92,10 +81,8 @@ def collect_and_fuse_bids():
         "하 (단순 키워드) 💡": {}
     }
 
-    keyword_str = ", ".join(KEYWORDS)
-
     for keyword in KEYWORDS:
-        # Part A: 나라장터(G2B) 데이터 수집
+        # Part A: 나라장터(G2B) 데이터 수집 (정상 작동분 유지)
         for api_tag, url in G2B_ENDPOINTS.items():
             params = {
                 'ServiceKey': SERVICE_KEY, 'type': 'json', 'numOfRows': '50', 'pageNo': '1',
@@ -123,56 +110,56 @@ def collect_and_fuse_bids():
             except Exception:
                 continue
 
-        # Part B: 국방전자조달(D2B) 수집 엔진 (누락 원인 완벽 해결)
+        # Part B: 국방전자조달(D2B) 수집 (담당자님 최초 코드 방식 완벽 복원)
         keyword_encoded = urllib.parse.quote(keyword)
         for api_tag, url in D2B_ENDPOINTS.items():
-            # 💡 [핵심 버그 수정 1] inqryBgnDate 파라미터를 강제 주입하여 7일 치를 모두 가져오도록 조치!
+            # 파라미터 딕셔너리를 쓰지 않고, 담당자님 원래 코드처럼 URL 문자열(f-string)로 직접 쏴서 인증 오류 원천 차단
             full_url = (
-                f"{url}?serviceKey={SERVICE_KEY}&pageNo=1&numOfRows=100&bidNm={keyword_encoded}"
-                f"&inqryBgnDate={d2b_date_start}&inqryEndDate={d2b_date_end}"
+                f"{url}?serviceKey={SERVICE_KEY}"
+                f"&pageNo=1&numOfRows=100"
+                f"&bidNm={keyword_encoded}"
             )
             try:
-                res = requests.get(full_url, timeout=15)
-                if res.status_code == 200:
-                    root = ET.fromstring(res.content)
+                response = requests.get(full_url, timeout=15)
+                if response.status_code == 200:
+                    root = ET.fromstring(response.content)
                     items = root.findall('.//item')
                     
                     for item in items:
                         try:
-                            title = item.findtext('bidNm', '')
-                            # 💡 [핵심 버그 수정 2] G2B 번호가 없으면 D2B 고유 공고번호(pblancNo)를 추출!
+                            title = item.findtext('bidNm', 'N/A')
                             g2b_no = item.findtext('g2bPblancNo', '').strip()
                             d2b_no = item.findtext('pblancNo', '').strip()
-                            bid_id = g2b_no if g2b_no else d2b_no
                             
-                            # 발주기관 및 계약방식 조합
-                            ornt = item.findtext('ornt', '-')
-                            cntrct_mth = item.findtext('cntrctMth', '')
-                            display_org = f"{ornt} | {cntrct_mth}" if cntrct_mth else ornt
-
-                            # 💡 [핵심 버그 수정 3] None 값이 오더라도 무시하고 진행 중으로 처리!
-                            clse_dt_str = item.findtext('rgstClseDt', '')
+                            # 💡 담당자님 원래 방식 그대로 마감일자 파싱 (에러 발생 시 패스하지 않고 진행중으로 간주)
+                            clse_dt_str = item.findtext('rgstClseDt') 
                             if clse_dt_str and clse_dt_str.lower() != 'none' and len(clse_dt_str) >= 12:
                                 try:
                                     clse_dt = datetime.strptime(clse_dt_str[:12], "%Y%m%d%H%M")
-                                    if kst_now > clse_dt: continue # 지난 공고는 스킵
+                                    if kst_now > clse_dt:
+                                        continue # 마감된 공고는 패스
                                     formatted_clse = f"{clse_dt_str[0:4]}-{clse_dt_str[4:6]}-{clse_dt_str[6:8]} {clse_dt_str[8:10]}:{clse_dt_str[10:12]}"
                                 except Exception:
                                     formatted_clse = clse_dt_str
                             else:
-                                formatted_clse = "None(마감 미정/진행중)"
+                                # None 이거나 비어있으면 26-육-146 공고처럼 마감 미정(진행중)으로 판단하여 리스트에 올림
+                                formatted_clse = "None(진행중)"
 
                             score, grade = evaluate_bid_grade(title)
                             if score != -1:
-                                bid_id_safe = bid_id if bid_id else title
-                                master_container[grade][bid_id_safe] = {
+                                bid_id = g2b_no if g2b_no else (d2b_no if d2b_no else title)
+                                ornt = item.findtext('ornt', 'N/A')
+                                cntrct_mth = item.findtext('cntrctMth', '')
+                                display_org = f"{ornt} | {cntrct_mth}" if cntrct_mth else ornt
+
+                                master_container[grade][bid_id] = {
                                     'bidNtceNm': title,
                                     'display_org': display_org,
                                     '_api_type': f"D2B {api_tag}",
                                     'formatted_url': 'https://www.d2b.go.kr/',
                                     'display_date': formatted_clse,
-                                    'bidNtceNo': bid_id_safe,
-                                    'prtcptLmtRgnNm': "국방특화",
+                                    'bidNtceNo': bid_id,
+                                    'prtcptLmtRgnNm': "국방전용",
                                     'indstrytyLmtYn': "N"
                                 }
                         except Exception:
@@ -180,6 +167,7 @@ def collect_and_fuse_bids():
             except Exception:
                 continue
 
+    keyword_str = ", ".join(KEYWORDS)
     return master_container, keyword_str
 
 # ==========================================
@@ -229,7 +217,6 @@ def build_html_and_dispatch():
     else:
         html_content = f"<h3>진행 중인 '{keyword_str}' 관련 유효 물품/용역 공고가 없습니다.</h3>"
 
-    # 이메일 동시 단일 발송
     try:
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
