@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 # ==========================================
 # 1. 시스템 통합 글로벌 설정
 # ==========================================
-RECEIVERS = ['lucas.park@dabeeo.com']
+RECEIVERS = ['lucas.park@dabeeo.com', 'joohyeon.kim@dabeeo.com']
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
 
 SENDER_EMAIL = os.environ.get("SMTP_EMAIL", "lucas.park@dabeeo.com")
@@ -35,7 +35,6 @@ NEGATIVE_KEYWORDS = [
     "장치", "기념", "콘텐츠", "설치", "문화", "의료", "홍보", "방송", "초음파", "여행", 
     "시설", "의학", "드라마", "스포츠", "자막", "행사", "제조설비", "공장생산", "공장등록", 
     "단순제조", "탑재체", "부품", "수리", "정비", "기체", "배터리", "하드웨어", "청소", "폐기물", "구매",
-    # 새로 추가된 강력한 네거티브 키워드
     "제조", "애니메이션", "LLM", "로봇", "영화", "임차", "공사", "강수량", "인재", "대학교", 
     "상품", "반도체", "서버", "냉방기", "장비", "학생", "골프장", "월드컵", "주파수", "학년도", 
     "가이드", "교육", "섬유", "약물", "진료", "파일럿", "음악", "기자재", "음료", "상담"
@@ -59,10 +58,10 @@ def evaluate_bid_grade(title):
     # 국방/위성 특화 복합 키워드 시너지 가점
     if "위성" in title and ("영상" in title or "데이터" in title or "검보정" in title or "활용" in title):
         score += 15
-        
-    # 등급 판정 로직 (하 등급 원천 제거 및 상 등급 조건 강화)
+
+    # 등급 판정 로직
     if score >= 50:
-        # 점수가 50점을 넘더라도 핵심 키워드 3대장 중 하나가 필수 포함되어야 '상' 등급 부여
+        # 상 등급 진입 허들: 위성, 드론, 공간정보 셋 중 하나 필수
         if any(k in title for k in ["위성", "드론", "공간정보"]):
             return score, "상 (핵심 타겟) 🎯"
         else:
@@ -70,7 +69,6 @@ def evaluate_bid_grade(title):
     elif score >= 20:
         return score, "중 (검토 권장) 🔍"
     else:
-        # 20점 미만인 '하' 등급은 아예 알림에서 제외
         return -1, "제외"
 
 # ==========================================
@@ -143,7 +141,7 @@ def collect_and_fuse_bids():
                                 try:
                                     clse_dt = datetime.strptime(clse_dt_str[:12], "%Y%m%d%H%M")
                                     if kst_now > clse_dt:
-                                        continue # 마감된 공고 패스
+                                        continue
                                     formatted_clse = f"{clse_dt_str[0:4]}-{clse_dt_str[4:6]}-{clse_dt_str[6:8]} {clse_dt_str[8:10]}:{clse_dt_str[10:12]}"
                                 except Exception:
                                     formatted_clse = clse_dt_str
@@ -188,12 +186,21 @@ def build_html_and_dispatch():
         html_content = f"""
         <html>
         <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
-            <h2>🚀 나라장터 및 국방전자조달 통합 인텔리전스</h2>
+            <h2 style='color: #2c3e50;'>🚀 나라장터 및 국방전자조달 통합 인텔리전스</h2>
             <p>다비오 비즈니스 도메인 연관도 스코어링 알고리즘에 따라 총 <b>{total_count}건</b>의 진행 중인 유효 공고가 분류되었습니다.</p>
-            <p style='font-size:12px; color:gray;'>조회 키워드: {keyword_str}</p>
+            <p style='font-size:12px; color:gray; margin-bottom: 25px;'>조회 키워드: {keyword_str}</p>
+            
+            <div style='background-color: #f1f8ff; padding: 18px; border-radius: 8px; font-size: 13px; margin-bottom: 30px; border: 1px solid #d0e2f3;'>
+                <h4 style='margin-top: 0; margin-bottom: 12px; color: #0056b3; font-size: 14px;'>💡 리포트 100% 활용 가이드 및 FAQ</h4>
+                <ul style='margin: 0; padding-left: 20px; color: #444;'>
+                    <li style='margin-bottom: 8px;'>🎯 <b>'상 (핵심 타겟)' 분류 기준:</b> 다비오 핵심 사업인 <b>'위성', '드론', '공간정보'</b> 중 최소 1개 이상이 공고명에 명시적으로 포함된 경우에만 '상' 등급에 노출되도록 필터링을 강화했습니다.</li>
+                    <li style='margin-bottom: 8px;'>🛡️ <b>국방전자조달(D2B) 공고 확인법:</b> 국방전자조달 시스템 보안 특성상 상세 링크로의 직접 연결이 어렵습니다. 아래 리스트에서 <b>'공고번호'를 복사</b>하신 후 <a href='https://www.d2b.go.kr/' target='_blank' style='color:#e74c3c; font-weight:bold;'>D2B 홈페이지</a> 검색창에 <b>붙여넣기</b> 하시면 상세 내용을 바로 확인하실 수 있습니다.</li>
+                    <li style='margin-bottom: 8px;'>🔍 <b>단순 제조/공사/물품은 안 보이나요?:</b> 네, '제조, 공사, 서버, 하드웨어' 등 30여 개의 강력한 네거티브 필터링 알고리즘을 거쳐 다비오와 무관한 공고는 <b>전면 자동 제외</b> 처리됩니다.</li>
+                    <li style='margin-bottom: 4px;'>⏰ <b>마감된 공고도 오나요?:</b> 본 메일은 발송 시점 기준으로 <b>입찰/참가 등록이 마감되지 않은 '진행 중'인 유효 공고만</b>을 선별하여 전달합니다.</li>
+                </ul>
+            </div>
         """
         
-        # '하' 등급이 로직에서 빠졌으므로 '상', '중' 만 루프를 돕니다.
         for grade in ["상 (핵심 타겟) 🎯", "중 (검토 권장) 🔍"]:
             items_dict = container[grade]
             if not items_dict: continue
@@ -205,6 +212,10 @@ def build_html_and_dispatch():
             for idx, item in enumerate(sorted_items, 1):
                 region = item.get('prtcptLmtRgnNm') or item.get('cnstrtsiteRgnNm') or "전국"
                 api_tag = item.get('_api_type', '기타')
+                
+                # D2B 공고일 경우 복사 안내 텍스트 추가
+                btn_text = "D2B 시스템 이동 (공고번호 복사 필수)" if "D2B" in api_tag else "공고 상세 보기"
+                btn_color = "#34495e" if "D2B" in api_tag else border_color
 
                 html_content += f"""
                 <div style='margin-bottom: 15px; padding: 12px; border-left: 4px solid {border_color}; background-color: #f9f9f9;'>
@@ -213,9 +224,9 @@ def build_html_and_dispatch():
                         {idx}. {item.get('bidNtceNm', '공고명 없음')}
                     </h4>
                     <p style='margin: 4px 0; font-size:13px;'><b>🔹 발주기관 및 계약:</b> {item.get('display_org', '-')}</p>
-                    <p style='margin: 4px 0; font-size:13px;'><b>🔹 지역제한:</b> <span style='color:#27ae60; font-weight:bold;'>{region}</span> | <b>공고번호:</b> {item.get('bidNtceNo', '-')}</p>
+                    <p style='margin: 4px 0; font-size:13px;'><b>🔹 지역제한:</b> <span style='color:#27ae60; font-weight:bold;'>{region}</span> | <b>공고번호: <span style='font-size:14px; background-color:#ecf0f1; padding:1px 4px; border:1px solid #ccc; border-radius:3px;'>{item.get('bidNtceNo', '-')}</span></b></p>
                     <p style='margin: 4px 0; font-size:13px;'><b>🔹 마감일시:</b> <span style='color: #e74c3c; font-weight:bold;'>{item.get('display_date', '-')}</span></p>
-                    <p style='margin: 8px 0 0 0;'><a href='{item.get('formatted_url', '-')}' target='_blank' style='background-color: {border_color}; color: white; padding: 4px 8px; text-decoration: none; border-radius: 3px; font-size:12px; font-weight:bold;'>공고 시스템 이동</a></p>
+                    <p style='margin: 12px 0 0 0;'><a href='{item.get('formatted_url', '-')}' target='_blank' style='background-color: {btn_color}; color: white; padding: 5px 10px; text-decoration: none; border-radius: 4px; font-size:12px; font-weight:bold;'>{btn_text}</a></p>
                 </div>
                 """
         html_content += "</body></html>"
