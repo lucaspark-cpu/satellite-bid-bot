@@ -2,10 +2,8 @@ name: Dabeeo Unified Bid Notice Cron Engine
 
 on:
   schedule:
-    # KST 기준 평일 월요일 및 목요일 오전 08:30 정각 크론 자동화 구동 스펙
-    # 월요일 오전 08:30 -> 일요일 UTC 23:30 (cron: '30 23 * * 0')
-    # 목요일 오전 08:30 -> 수요일 UTC 23:30 (cron: '30 23 * * 3')
-    - cron: '30 23 * * 0,3'
+    # 💡 KST 기준 평일(월~금) 오전 08:30 자동 발송되도록 UTC 23:30 (일~목)으로 수정 완료
+    - cron: '30 23 * * 0-4'
   workflow_dispatch: # 수동 즉시 강제 발송 실행 단추 지원
 
 jobs:
