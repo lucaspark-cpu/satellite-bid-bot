@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 # ==========================================
 # 1. 시스템 통합 글로벌 설정
 # ==========================================
-# 💡 두 분 모두에게 통합 리포트가 도달하도록 수신자 리스트 확장
+# 💡 수신자 리스트 정의 (수정 완료)
 RECEIVERS = ['lucas.park@dabeeo.com']
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
 
@@ -26,7 +26,7 @@ D2B_ENDPOINTS = {
     '공개수의': 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcOthbcVltrnNtatPlanList'
 }
 
-# 💡 목표하시는 "26-육-146 상용위성 영상정보 전술제대 활용방안 연구"를 확실히 포착하기 위해 키워드 풀 확장
+# 💡 목표 공고를 포착하기 위해 키워드 풀 확장 유지
 KEYWORDS = ['위성', '영상', '공간정보', 'AI', '드론', '활용방안']
 
 # ==========================================
@@ -113,8 +113,6 @@ def collect_and_fuse_bids():
 
         # Part B: 국방전자조달(D2B) 수집
         for api_tag, url in D2B_ENDPOINTS.items():
-            # 💡 [핵심 수정] URL 결합을 버리고, requests.get의 params를 사용하여 
-            # '+' 기호 등 특수문자가 포함된 인증키가 웹 표준에 맞게 안전하게 인코딩 되도록 조치합니다.
             params = {
                 'serviceKey': SERVICE_KEY,
                 'pageNo': '1',
@@ -222,8 +220,8 @@ def build_html_and_dispatch():
             server.starttls()
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
             
-            # 수신자별 개별 독립 발송 (서로의 이메일 주소가 노출되지 않도록 처리)
-            for receiver in RECEIVER_LIST:
+            # 💡 [핵심 수정] RECEIVER_LIST가 아닌 RECEIVERS로 참조하도록 수정 완료
+            for receiver in RECEIVERS:
                 msg = MIMEMultipart()
                 msg['From'] = SENDER_EMAIL
                 msg['To'] = receiver
