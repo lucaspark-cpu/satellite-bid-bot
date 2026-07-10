@@ -2,11 +2,11 @@ name: Dabeeo Unified Bid Notice Cron Engine
 
 on:
   schedule:
-    # 💡 UTC 23:30 = 한국 표준시(KST) 평일 월요일 및 목요일 오전 08:30 정각 발송 스케줄러 보장
-    # 월요일 오전 08:30 기동 스케줄 -> 크론 일요일 23:30 (cron: '30 23 * * 0')
-    # 목요일 오전 08:30 기동 스케줄 -> 크론 수요일 23:30 (cron: '30 23 * * 3')
+    # 💡 UTC 23:30 = 한국 표준시(KST) 월요일 및 목요일 오전 08:30 정각 발송 스케줄러 보장
+    # 월요일 오전 08:30 실행 -> 일요일 UTC 23:30 (cron: '30 23 * * 0')
+    # 목요일 오전 08:30 실행 -> 수요일 UTC 23:30 (cron: '30 23 * * 3')
     - cron: '30 23 * * 0,3'
-  workflow_dispatch: # 관리자용 수동 즉시 실행(Run workflow) 버튼 활성화 스펙 유지
+  workflow_dispatch: # 수동 실행(Run workflow) 버튼 활성화
 
 jobs:
   execute-intelligence-bot:
