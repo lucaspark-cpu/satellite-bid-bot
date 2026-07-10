@@ -25,7 +25,7 @@ D2B_ENDPOINTS = {
     '공개수의': 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcOthbcVltrnNtatPlanList'
 }
 
-# 검색 조회를 위한 풀 (그대로 유지)
+# 검색 조회를 위한 풀
 KEYWORDS = ['위성', '공간정보', 'AI', '드론', '영상']
 
 # ==========================================
@@ -41,9 +41,7 @@ NEGATIVE_KEYWORDS = [
     "가이드", "교육", "섬유", "약물", "진료", "파일럿", "음악", "기자재", "음료", "상담"
 ]
 
-# '해양' 제거 (MID로 이동)
 HIGH_WEIGHT_KEYWORDS = ["영상", "분석", "AI", "인공지능", "공간정보", "알고리즘", "플랫폼", "소프트웨어", "SW", "디지털트윈", "데이터", "정제", "무인", "관측", "검보정"]
-# '해양' 추가, '연구', '활용방안' 가중치 제거 (단순 키워드로만 둠)
 MID_WEIGHT_KEYWORDS = ["위성", "상용위성", "드론", "무인기", "정찰", "감시", "시스템", "정보", "구축", "해양"]
 
 def evaluate_bid_grade(title):
@@ -62,14 +60,18 @@ def evaluate_bid_grade(title):
     if "위성" in title and ("영상" in title or "데이터" in title or "검보정" in title or "활용" in title):
         score += 15
         
-    # 무인 if 문은 요청에 따라 제거됨
-
+    # 등급 판정 로직 (하 등급 원천 제거 및 상 등급 조건 강화)
     if score >= 50:
-        return score, "상 (핵심 타겟) 🎯"
+        # 점수가 50점을 넘더라도 핵심 키워드 3대장 중 하나가 필수 포함되어야 '상' 등급 부여
+        if any(k in title for k in ["위성", "드론", "공간정보"]):
+            return score, "상 (핵심 타겟) 🎯"
+        else:
+            return score, "중 (검토 권장) 🔍"
     elif score >= 20:
         return score, "중 (검토 권장) 🔍"
     else:
-        return score, "하 (단순 키워드) 💡"
+        # 20점 미만인 '하' 등급은 아예 알림에서 제외
+        return -1, "제외"
 
 # ==========================================
 # 3. 데이터 융합 엔진 
@@ -83,8 +85,7 @@ def collect_and_fuse_bids():
 
     master_container = {
         "상 (핵심 타겟) 🎯": {},
-        "중 (검토 권장) 🔍": {},
-        "하 (단순 키워드) 💡": {}
+        "중 (검토 권장) 🔍": {}
     }
 
     for keyword in KEYWORDS:
@@ -192,12 +193,13 @@ def build_html_and_dispatch():
             <p style='font-size:12px; color:gray;'>조회 키워드: {keyword_str}</p>
         """
         
-        for grade in ["상 (핵심 타겟) 🎯", "중 (검토 권장) 🔍", "하 (단순 키워드) 💡"]:
+        # '하' 등급이 로직에서 빠졌으므로 '상', '중' 만 루프를 돕니다.
+        for grade in ["상 (핵심 타겟) 🎯", "중 (검토 권장) 🔍"]:
             items_dict = container[grade]
             if not items_dict: continue
                 
             sorted_items = sorted(items_dict.values(), key=lambda x: x.get('display_date', ''), reverse=True)
-            border_color = "#e74c3c" if "상" in grade else "#f39c12" if "중" in grade else "#3498db"
+            border_color = "#e74c3c" if "상" in grade else "#f39c12"
             html_content += f"<h3 style='color:{border_color}; margin-top:30px; border-bottom:2px solid {border_color}; padding-bottom:5px;'>{grade} ({len(sorted_items)}건)</h3>"
             
             for idx, item in enumerate(sorted_items, 1):
@@ -218,7 +220,7 @@ def build_html_and_dispatch():
                 """
         html_content += "</body></html>"
     else:
-        html_content = f"<h3>진행 중인 '{keyword_str}' 관련 유효 물품/용역 공고가 없습니다.</h3>"
+        html_content = f"<h3>진행 중인 '{keyword_str}' 관련 유효 공고가 없습니다.</h3>"
 
     try:
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
