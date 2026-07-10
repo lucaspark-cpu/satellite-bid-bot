@@ -2,11 +2,11 @@ name: Dabeeo Unified Bid Notice Cron Engine
 
 on:
   schedule:
-    # 💡 UTC 23:30 = 한국 표준시(KST) 월요일 및 목요일 오전 08:30 정각 발송 스케줄러 보장
-    # 월요일 오전 08:30 실행 -> 일요일 UTC 23:30 (cron: '30 23 * * 0')
-    # 목요일 오전 08:30 실행 -> 수요일 UTC 23:30 (cron: '30 23 * * 3')
+    # KST 기준 평일 월요일 및 목요일 오전 08:30 정각 크론 자동화 구동 스펙
+    # 월요일 오전 08:30 -> 일요일 UTC 23:30 (cron: '30 23 * * 0')
+    # 목요일 오전 08:30 -> 수요일 UTC 23:30 (cron: '30 23 * * 3')
     - cron: '30 23 * * 0,3'
-  workflow_dispatch: # 수동 실행(Run workflow) 버튼 활성화
+  workflow_dispatch: # 수동 즉시 강제 발송 실행 단추 지원
 
 jobs:
   execute-intelligence-bot:
@@ -16,12 +16,12 @@ jobs:
     - name: 저장소 체크아웃
       uses: actions/checkout@v4
 
-    - name: Python 3.10 런타임 환경설정
+    - name: Python 3.10 환경 구성
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
-    - name: 필수 의존성 패키지(requests) 라이브러리 설치
+    - name: 오픈 API 호출용 requests 모듈 설치
       run: |
         python -m pip install --upgrade pip
         pip install requests
