@@ -32,21 +32,19 @@ KEYWORDS = ['위성', '영상', '공간정보']
 # ==========================================
 # 2. 다비오 스코어링 & 확장 네거티브 필터 알고리즘
 # ==========================================
-# 가치 없는 공고를 완벽히 쳐내기 위한 확장 네거티브 리스트 (요청 반영)
 NEGATIVE_KEYWORDS = [
     "장치", "기념", "콘텐츠", "설치", "문화", "의료", "홍보", "방송", "초음파", "여행", 
     "시설", "의학", "드라마", "스포츠", "자막", "행사", "제조설비", "공장생산", "공장등록", 
     "단순제조", "탑재체", "부품", "수리", "정비", "기체", "배터리", "하드웨어", "청소", "폐기물", "구매"
 ]
 
-# 무인수상선, 해양 관측, 검보정 등 핵심 과제를 무조건 '상' 등급으로 올리기 위한 가중치
 HIGH_WEIGHT_KEYWORDS = ["영상", "분석", "AI", "인공지능", "공간정보", "알고리즘", "플랫폼", "소프트웨어", "SW", "디지털트윈", "데이터", "정제", "무인", "관측", "해양", "검보정"]
 MID_WEIGHT_KEYWORDS = ["위성", "드론", "무인기", "정찰", "감시", "시스템", "활용방안", "연구", "정보", "구축"]
 
 def evaluate_bid(title):
     clean_title = title.replace(" ", "")
     
-    # 1. 정밀 네거티브 필터 (공백 제거 본문까지 이중 스크리닝)
+    # 1. 정밀 네거티브 필터 (원본 텍스트 및 공백 제거 텍스트 교차 검증)
     for nk in NEGATIVE_KEYWORDS:
         if nk in title or nk in clean_title:
             return -1, "제외"
@@ -119,7 +117,7 @@ def collect_and_fuse_bids():
             except Exception:
                 continue
 
-        # Part B: 국방전자조달(D2B) 수집 엔진 (개별 예외 격리 구조로 전면 혁신)
+        # Part B: 국방전자조달(D2B) 수집 엔진
         keyword_encoded = urllib.parse.quote(keyword)
         for api_tag, url in D2B_ENDPOINTS.items():
             full_url = f"{url}?serviceKey={SERVICE_KEY}&pageNo=1&numOfRows=100&bidNm={keyword_encoded}"
@@ -130,20 +128,18 @@ def collect_and_fuse_bids():
                     items = root.findall('.//item')
                     
                     for item in items:
-                        # 💡 [핵심 보완] 개별 item 마다 try-except를 감싸서 단 1개의 에러가 전체 배치를 깨뜨리지 않도록 격리함
                         try:
                             title = item.findtext('bidNm', '')
                             g2b_no = item.findtext('g2bPblancNo', '')
                             g2b_no = g2b_no.strip() if g2b_no else ""
                             clse_dt_str = item.findtext('rgstClseDt', '')
                             
-                            # 실시간 마감 처리 및 None 값 방어 룰
                             if clse_dt_str and len(clse_dt_str) >= 12 and clse_dt_str.lower() != 'none':
                                 try:
                                     clse_dt = datetime.strptime(clse_dt_str[:12], "%Y%m%d%H%M")
                                     if kst_now > clse_dt: continue
                                     formatted_clse = f"{clse_dt_str[0:4]}-{clse_dt_str[4:6]}-{clse_dt_str[6:8]} {clse_dt_str[8:10]}:{clse_dt_str[10:12]}"
-                                  except Exception:
+                                except Exception:
                                     formatted_clse = clse_dt_str
                             else:
                                 formatted_clse = "None(진행중)"
@@ -161,8 +157,8 @@ def collect_and_fuse_bids():
                                     'prtcptLmtRgnNm': "국방특화",
                                     'indstrytyLmtYn': "N"
                                 }
-                        except Exception as item_err:
-                            # 개별 공고 파싱 실패 시 해당 공고만 스킵하고 루프를 유지함
+                        # 💡 [들여쓰기 오차 수정 완료] 개별 오류 격리 블록 인덴트 완벽 정렬
+                        except Exception:
                             continue
             except Exception:
                 continue
