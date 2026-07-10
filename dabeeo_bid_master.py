@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 # 1. 시스템 통합 글로벌 설정
 # ==========================================
 # 💡 두 분 모두에게 통합 리포트가 도달하도록 수신자 리스트 확장
-RECEIVERS = ['lucas.park@dabeeo.com', 'joohyeon.kim@dabeeo.com']
+RECEIVERS = ['lucas.park@dabeeo.com']
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
 
 SENDER_EMAIL = os.environ.get("SMTP_EMAIL", "lucas.park@dabeeo.com")
