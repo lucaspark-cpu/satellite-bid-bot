@@ -62,7 +62,7 @@ def evaluate_bid_grade(title):
     # 등급 판정 로직
     if score >= 50:
         # 상 등급 진입 허들: 위성, 드론, 공간정보 셋 중 하나 필수
-        if any(k in title for k in ["위성", "드론", "AI"]):
+        if any(k in title for k in ["위성", "드론"]):
             return score, "상 (핵심 타겟) 🎯"
         else:
             return score, "중 (검토 권장) 🔍"
