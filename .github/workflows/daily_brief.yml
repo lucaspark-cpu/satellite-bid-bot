@@ -1,39 +1,33 @@
-name: Daily Defense Tech Briefing
+name: Dabeeo Unified Bid Notice Cron Engine
 
 on:
-schedule:
-    - cron: '30 23 * * 0-4'  
-    # 일~목요일 지중 23:30 (KST 기준 월~금요일 아침 08:30) 분산 트래픽을 고려한 조기 기동
-  workflow_dispatch:      # 수동 실행 시 입력창 호출
-    inputs:
-      receiver_email:
-        description: '메일 받을 주소들을 쉼표(,)로 구분해서 적어주세요. (예: aaa@com, bbb@com)'
-        required: false
-        default: ''
-        type: string
+  schedule:
+    # 💡 UTC 23:30 = 한국 표준시(KST) 평일 월요일 및 목요일 오전 08:30 정각 발송 스케줄러 보장
+    # 월요일 오전 08:30 기동 스케줄 -> 크론 일요일 23:30 (cron: '30 23 * * 0')
+    # 목요일 오전 08:30 기동 스케줄 -> 크론 수요일 23:30 (cron: '30 23 * * 3')
+    - cron: '30 23 * * 0,3'
+  workflow_dispatch: # 관리자용 수동 즉시 실행(Run workflow) 버튼 활성화 스펙 유지
 
 jobs:
-  run-briefing:
+  execute-intelligence-bot:
     runs-on: ubuntu-latest
 
     steps:
     - name: 저장소 체크아웃
       uses: actions/checkout@v4
 
-    - name: Python 환경 설정
+    - name: Python 3.10 런타임 환경설정
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
-    - name: 필수 라이브러리 설치
+    - name: 필수 의존성 패키지(requests) 라이브러리 설치
       run: |
         python -m pip install --upgrade pip
         pip install requests
 
-    - name: 브리핑 스크립트 실행 및 메일 발송
+    - name: 다비오 통합 비즈니스 인텔리전스 엔진 가동
       env:
-        DATA_GO_KR_API_KEY: ${{ secrets.DATA_GO_KR_API_KEY }}
         SMTP_EMAIL: ${{ secrets.SMTP_EMAIL }}
         SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-        RECEIVER_EMAIL: ${{ inputs.receiver_email || secrets.RECEIVER_EMAIL }}
-      run: python defense_brief.py
+      run: python dabeeo_bid_master.py
