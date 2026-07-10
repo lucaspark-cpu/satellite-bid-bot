@@ -1,7 +1,6 @@
 import os
 import sys
 import requests
-import urllib.parse
 import smtplib
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
@@ -11,7 +10,8 @@ import xml.etree.ElementTree as ET
 # ==========================================
 # 1. 시스템 통합 글로벌 설정
 # ==========================================
-RECEIVERS = ['lucas.park@dabeeo.com']
+# 💡 두 분 모두에게 통합 리포트가 도달하도록 수신자 리스트 확장
+RECEIVERS = ['lucas.park@dabeeo.com', 'joohyeon.kim@dabeeo.com']
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
 
 SENDER_EMAIL = os.environ.get("SMTP_EMAIL", "lucas.park@dabeeo.com")
@@ -21,13 +21,13 @@ G2B_ENDPOINTS = {
     '용역': 'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch',
     '물품': 'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoThngPPSSrch'
 }
-# 담당자님 원본 코드 엔드포인트 그대로 복원
 D2B_ENDPOINTS = {
     '경쟁입찰': 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcCmpetBidPblancList',
     '공개수의': 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcOthbcVltrnNtatPlanList'
 }
 
-KEYWORDS = ['위성', '영상', '공간정보']
+# 💡 목표하시는 "26-육-146 상용위성 영상정보 전술제대 활용방안 연구"를 확실히 포착하기 위해 키워드 풀 확장
+KEYWORDS = ['위성', '영상', '공간정보', 'AI', '드론', '활용방안']
 
 # ==========================================
 # 2. 다비오 고도화 스코어링
@@ -39,7 +39,7 @@ NEGATIVE_KEYWORDS = [
 ]
 
 HIGH_WEIGHT_KEYWORDS = ["영상", "분석", "AI", "인공지능", "공간정보", "알고리즘", "플랫폼", "소프트웨어", "SW", "디지털트윈", "데이터", "정제", "무인", "관측", "해양", "검보정"]
-MID_WEIGHT_KEYWORDS = ["위성", "드론", "무인기", "정찰", "감시", "시스템", "활용방안", "연구", "정보", "구축"]
+MID_WEIGHT_KEYWORDS = ["위성", "상용위성", "드론", "무인기", "정찰", "감시", "시스템", "활용방안", "연구", "정보", "구축"]
 
 def evaluate_bid_grade(title):
     clean_title = title.replace(" ", "")
@@ -53,7 +53,8 @@ def evaluate_bid_grade(title):
     for mk in MID_WEIGHT_KEYWORDS:
         if mk in title: score += 15
 
-    if "위성" in title and ("영상" in title or "데이터" in title or "검보정" in title):
+    # 국방/위성 특화 복합 키워드 시너지 가점
+    if "위성" in title and ("영상" in title or "데이터" in title or "검보정" in title or "활용" in title):
         score += 15
     if "무인" in title and ("관측" in title or "해양" in title):
         score += 15
@@ -66,7 +67,7 @@ def evaluate_bid_grade(title):
         return score, "하 (단순 키워드) 💡"
 
 # ==========================================
-# 3. 데이터 융합 엔진 (담당자님 원본 D2B 로직으로 복원)
+# 3. 데이터 융합 엔진 
 # ==========================================
 def collect_and_fuse_bids():
     kst_now = datetime.utcnow() + timedelta(hours=9)
@@ -82,7 +83,7 @@ def collect_and_fuse_bids():
     }
 
     for keyword in KEYWORDS:
-        # Part A: 나라장터(G2B) 데이터 수집 (정상 작동분 유지)
+        # Part A: 나라장터(G2B) 데이터 수집
         for api_tag, url in G2B_ENDPOINTS.items():
             params = {
                 'ServiceKey': SERVICE_KEY, 'type': 'json', 'numOfRows': '50', 'pageNo': '1',
@@ -110,17 +111,19 @@ def collect_and_fuse_bids():
             except Exception:
                 continue
 
-        # Part B: 국방전자조달(D2B) 수집 (담당자님 최초 코드 방식 완벽 복원)
-        keyword_encoded = urllib.parse.quote(keyword)
+        # Part B: 국방전자조달(D2B) 수집
         for api_tag, url in D2B_ENDPOINTS.items():
-            # 파라미터 딕셔너리를 쓰지 않고, 담당자님 원래 코드처럼 URL 문자열(f-string)로 직접 쏴서 인증 오류 원천 차단
-            full_url = (
-                f"{url}?serviceKey={SERVICE_KEY}"
-                f"&pageNo=1&numOfRows=100"
-                f"&bidNm={keyword_encoded}"
-            )
+            # 💡 [핵심 수정] URL 결합을 버리고, requests.get의 params를 사용하여 
+            # '+' 기호 등 특수문자가 포함된 인증키가 웹 표준에 맞게 안전하게 인코딩 되도록 조치합니다.
+            params = {
+                'serviceKey': SERVICE_KEY,
+                'pageNo': '1',
+                'numOfRows': '100',
+                'bidNm': keyword
+            }
+            
             try:
-                response = requests.get(full_url, timeout=15)
+                response = requests.get(url, params=params, timeout=15)
                 if response.status_code == 200:
                     root = ET.fromstring(response.content)
                     items = root.findall('.//item')
@@ -131,18 +134,16 @@ def collect_and_fuse_bids():
                             g2b_no = item.findtext('g2bPblancNo', '').strip()
                             d2b_no = item.findtext('pblancNo', '').strip()
                             
-                            # 💡 담당자님 원래 방식 그대로 마감일자 파싱 (에러 발생 시 패스하지 않고 진행중으로 간주)
                             clse_dt_str = item.findtext('rgstClseDt') 
                             if clse_dt_str and clse_dt_str.lower() != 'none' and len(clse_dt_str) >= 12:
                                 try:
                                     clse_dt = datetime.strptime(clse_dt_str[:12], "%Y%m%d%H%M")
                                     if kst_now > clse_dt:
-                                        continue # 마감된 공고는 패스
+                                        continue # 마감된 공고 패스
                                     formatted_clse = f"{clse_dt_str[0:4]}-{clse_dt_str[4:6]}-{clse_dt_str[6:8]} {clse_dt_str[8:10]}:{clse_dt_str[10:12]}"
                                 except Exception:
                                     formatted_clse = clse_dt_str
                             else:
-                                # None 이거나 비어있으면 26-육-146 공고처럼 마감 미정(진행중)으로 판단하여 리스트에 올림
                                 formatted_clse = "None(진행중)"
 
                             score, grade = evaluate_bid_grade(title)
@@ -171,19 +172,19 @@ def collect_and_fuse_bids():
     return master_container, keyword_str
 
 # ==========================================
-# 4. HTML 리포트 UI 생성 및 동시 전송
+# 4. HTML 리포트 UI 생성 및 개별 전송
 # ==========================================
 def build_html_and_dispatch():
     container, keyword_str = collect_and_fuse_bids()
     total_count = sum(len(bids) for bids in container.values())
     
-    subject = "📢 [나라장터/D2B 통합] 다비오 맞춤형 신규 용역/물품 공고 리포트"
+    subject = "📢 [나라장터/D2B 통합본] 다비오 맞춤형 신안보/공공 공고 인텔리전스"
     
     if total_count > 0:
         html_content = f"""
         <html>
         <body style='font-family: Arial, sans-serif; line-height: 1.6; color: #333;'>
-            <h2>🚀 나라장터 및 국방 조달 맞춤형 인텔리전스</h2>
+            <h2>🚀 나라장터 및 국방전자조달 통합 인텔리전스</h2>
             <p>다비오 비즈니스 도메인 연관도 스코어링 알고리즘에 따라 총 <b>{total_count}건</b>의 진행 중인 유효 공고가 분류되었습니다.</p>
             <p style='font-size:12px; color:gray;'>조회 키워드: {keyword_str}</p>
         """
@@ -198,8 +199,7 @@ def build_html_and_dispatch():
             
             for idx, item in enumerate(sorted_items, 1):
                 region = item.get('prtcptLmtRgnNm') or item.get('cnstrtsiteRgnNm') or "전국"
-                industry_lmt = "있음" if item.get('indstrytyLmtYn') == 'Y' else "없음"
-                api_tag = item.get('_api_type', '용역')
+                api_tag = item.get('_api_type', '기타')
 
                 html_content += f"""
                 <div style='margin-bottom: 15px; padding: 12px; border-left: 4px solid {border_color}; background-color: #f9f9f9;'>
@@ -218,17 +218,21 @@ def build_html_and_dispatch():
         html_content = f"<h3>진행 중인 '{keyword_str}' 관련 유효 물품/용역 공고가 없습니다.</h3>"
 
     try:
-        msg = MIMEMultipart()
-        msg['From'] = SENDER_EMAIL
-        msg['To'] = ", ".join(RECEIVERS)
-        msg['Subject'] = subject
-        msg.attach(MIMEText(html_content, 'html', 'utf-8'))
-        
         with smtplib.SMTP('smtp.gmail.com', 587) as server:
             server.starttls()
             server.login(SENDER_EMAIL, SENDER_PASSWORD)
-            server.sendmail(SENDER_EMAIL, RECEIVERS, msg.as_string())
-        print(f"✅ 통합 알림 동시 발송 완료! 대상자: {RECEIVERS}")
+            
+            # 수신자별 개별 독립 발송 (서로의 이메일 주소가 노출되지 않도록 처리)
+            for receiver in RECEIVER_LIST:
+                msg = MIMEMultipart()
+                msg['From'] = SENDER_EMAIL
+                msg['To'] = receiver
+                msg['Subject'] = subject
+                msg.attach(MIMEText(html_content, 'html', 'utf-8'))
+                
+                server.sendmail(SENDER_EMAIL, [receiver], msg.as_string())
+                print(f"✅ 통합 알림 발송 완료: {receiver}")
+                
     except Exception as e:
         print(f"❌ 통합 알림 발송 실패: {e}", file=sys.stderr)
 
