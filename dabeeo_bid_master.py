@@ -20,10 +20,10 @@ RAW_SERVICE_KEY = unquote(SERVICE_KEY)
 SENDER_EMAIL = os.environ.get("SMTP_EMAIL", "lucas.park@dabeeo.com")
 SENDER_PASSWORD = os.environ.get("SMTP_PASSWORD", "yxphvbqxpucobyut")
 
-# [수정] 신규 차세대 나라장터 API (서비스ID 15129394) 엔드포인트 적용
+# [수정] 올바른 신규 차세대 나라장터 API (서비스ID 15129394) EndPoint 적용
 G2B_ENDPOINTS = {
-    '용역': 'https://apis.data.go.kr/1230000/BidPublicInfoService03/getBidPblancListInfoServcPPSSrch02',
-    '물품': 'https://apis.data.go.kr/1230000/BidPublicInfoService03/getBidPblancListInfoThngPPSSrch02'
+    '용역': 'https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPblancListInfoServcPPSSrch02',
+    '물품': 'https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPblancListInfoThngPPSSrch02'
 }
 
 D2B_ENDPOINTS = {
@@ -96,9 +96,9 @@ def collect_and_fuse_bids():
         # Part A: 나라장터(G2B) 데이터 수집
         for api_tag, url in G2B_ENDPOINTS.items():
             params = {
-                'serviceKey': RAW_SERVICE_KEY,  # [수정] 소문자 serviceKey 및 Raw 인증키 적용
+                'serviceKey': RAW_SERVICE_KEY,
                 'type': 'json',
-                'numOfRows': '50',
+                'numOfRows': '30',       # [최적화] 조회 데이터 건수를 30건으로 조율하여 빠른 응답 유도
                 'pageNo': '1',
                 'inqryDiv': '1',
                 'inqryBgnDt': g2b_start,
@@ -107,9 +107,9 @@ def collect_and_fuse_bids():
                 'bidClseExcpYn': 'Y'
             }
             try:
-                res = requests.get(url, params=params, timeout=15)
+                # [최적화] 조달청 서버 네트워크 응답 지연 대비 timeout 30초 설정
+                res = requests.get(url, params=params, timeout=30)
                 
-                # HTTP 에러 발생 시 GitHub Actions 로그에 출력
                 if res.status_code != 200:
                     print(f"⚠️ G2B Error [{api_tag}-{keyword}] Code {res.status_code}: {res.text[:150]}", file=sys.stderr)
                     continue
@@ -138,7 +138,7 @@ def collect_and_fuse_bids():
         # Part B: 국방전자조달(D2B) 수집
         for api_tag, url in D2B_ENDPOINTS.items():
             params = {
-                'serviceKey': RAW_SERVICE_KEY,  # [수정] 동일한 Raw 인증키 사용
+                'serviceKey': RAW_SERVICE_KEY,
                 'pageNo': '1',
                 'numOfRows': '100',
                 'bidNm': keyword
@@ -233,7 +233,6 @@ def build_html_and_dispatch():
                 region = item.get('prtcptLmtRgnNm') or item.get('cnstrtsiteRgnNm') or "전국"
                 api_tag = item.get('_api_type', '기타')
                 
-                # D2B 공고일 경우 복사 안내 텍스트 추가
                 btn_text = "D2B 시스템 이동 (공고번호 복사 필수)" if "D2B" in api_tag else "공고 상세 보기"
                 btn_color = "#34495e" if "D2B" in api_tag else border_color
 
