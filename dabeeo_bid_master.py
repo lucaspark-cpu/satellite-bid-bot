@@ -2,25 +2,23 @@ import os
 import sys
 import requests
 import smtplib
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import xml.etree.ElementTree as ET
-from urllib.parse import unquote
 
 # ==========================================
 # 1. 시스템 통합 글로벌 설정
 # ==========================================
 RECEIVERS = ['lucas.park@dabeeo.com']
 
+# 공공데이터포털에서 발급받은 인코딩된 ServiceKey
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
-# requests 패키지 사용 시 중복 urlencoding을 방지하기 위해 unquote 수행
-RAW_SERVICE_KEY = unquote(SERVICE_KEY)
 
 SENDER_EMAIL = os.environ.get("SMTP_EMAIL", "lucas.park@dabeeo.com")
 SENDER_PASSWORD = os.environ.get("SMTP_PASSWORD", "yxphvbqxpucobyut")
 
-# [수정] 올바른 신규 차세대 나라장터 API (서비스ID 15129394) EndPoint 적용
+# [신규 차세대 API]
 G2B_ENDPOINTS = {
     '용역': 'https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPblancListInfoServcPPSSrch02',
     '물품': 'https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPblancListInfoThngPPSSrch02'
@@ -31,7 +29,6 @@ D2B_ENDPOINTS = {
     '공개수의': 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcOthbcVltrnNtatPlanList'
 }
 
-# 검색 조회를 위한 풀
 KEYWORDS = ['위성', '공간정보', 'AI', '드론', '영상', '모니터링', '변화']
 
 # ==========================================
@@ -61,13 +58,10 @@ def evaluate_bid_grade(title):
     for mk in MID_WEIGHT_KEYWORDS:
         if mk in title: score += 15
 
-    # 국방/위성 특화 복합 키워드 시너지 가점
     if "위성" in title and ("영상" in title or "데이터" in title or "검보정" in title or "활용" in title):
         score += 15
 
-    # 등급 판정 로직
     if score >= 50:
-        # 상 등급 진입 허들: 위성, 드론, 공간정보 셋 중 하나 필수
         if any(k in title for k in ["위성", "드론"]):
             return score, "상 (핵심 타겟) 🎯"
         else:
@@ -81,11 +75,15 @@ def evaluate_bid_grade(title):
 # 3. 데이터 융합 엔진 
 # ==========================================
 def collect_and_fuse_bids():
-    kst_now = datetime.utcnow() + timedelta(hours=9)
+    KST = timezone(timedelta(hours=9))
+    kst_now = datetime.now(KST)
     seven_days_ago = kst_now - timedelta(days=7)
     
-    g2b_start = seven_days_ago.strftime('%Y%m%d0000')
-    g2b_end = kst_now.strftime('%Y%m%d2359')
+    # [수정] 차세대 API용 날짜 포맷 (8자리 YYYYMMDD)
+    g2b_start = seven_days_ago.strftime('%Y%m%d')
+    g2b_end = kst_now.strftime('%Y%m%d')
+
+    print(f"ℹ️ [G2B 조회기간] {g2b_start} ~ {g2b_end}")
 
     master_container = {
         "상 (핵심 타겟) 🎯": {},
@@ -94,31 +92,40 @@ def collect_and_fuse_bids():
 
     for keyword in KEYWORDS:
         # Part A: 나라장터(G2B) 데이터 수집
-        for api_tag, url in G2B_ENDPOINTS.items():
-            params = {
-                'serviceKey': RAW_SERVICE_KEY,
-                'type': 'json',
-                'numOfRows': '30',       # [최적화] 조회 데이터 건수를 30건으로 조율하여 빠른 응답 유도
-                'pageNo': '1',
-                'inqryDiv': '1',
-                'inqryBgnDt': g2b_start,
-                'inqryEndDt': g2b_end,
-                'bidNtceNm': keyword,
-                'bidClseExcpYn': 'Y'
-            }
+        for api_tag, base_url in G2B_ENDPOINTS.items():
+            # [수정] 파라미터 조합 (inqryBgnDt, inqryEndDt 8자리)
+            full_url = f"{base_url}?serviceKey={SERVICE_KEY}&type=json&numOfRows=50&pageNo=1&inqryDiv=1&inqryBgnDt={g2b_start}&inqryEndDt={g2b_end}&bidNtceNm={keyword}"
+            
             try:
-                # [최적화] 조달청 서버 네트워크 응답 지연 대비 timeout 30초 설정
-                res = requests.get(url, params=params, timeout=30)
+                res = requests.get(full_url, timeout=30)
                 
                 if res.status_code != 200:
-                    print(f"⚠️ G2B Error [{api_tag}-{keyword}] Code {res.status_code}: {res.text[:150]}", file=sys.stderr)
+                    print(f"⚠️ G2B HTTP Error [{api_tag}-{keyword}] Status: {res.status_code}", file=sys.stderr)
                     continue
 
-                res_json = res.json()
-                items = res_json.get('response', {}).get('body', {}).get('items', [])
+                try:
+                    res_json = res.json()
+                except Exception:
+                    print(f"⚠️ G2B JSON Parsing Error [{api_tag}-{keyword}]: {res.text[:150]}", file=sys.stderr)
+                    continue
+
+                # 조달청 응답 데이터 추출
+                header = res_json.get('response', {}).get('header', {})
+                result_code = header.get('resultCode')
+                result_msg = header.get('resultMsg')
+                
+                if result_code != '00':
+                    print(f"⚠️ G2B API Error [{api_tag}-{keyword}]: {result_code} - {result_msg}", file=sys.stderr)
+                    continue
+
+                body = res_json.get('response', {}).get('body', {})
+                items = body.get('items', [])
+                
                 if isinstance(items, dict): 
                     items = [items]
                 
+                print(f"🔎 [G2B {api_tag}-{keyword}] 검색 결과 건수: {len(items)}건")
+
                 for item in items:
                     notice_no = item.get('bidNtceNo')
                     title = item.get('bidNtceNm', '')
@@ -136,16 +143,10 @@ def collect_and_fuse_bids():
                 continue
 
         # Part B: 국방전자조달(D2B) 수집
-        for api_tag, url in D2B_ENDPOINTS.items():
-            params = {
-                'serviceKey': RAW_SERVICE_KEY,
-                'pageNo': '1',
-                'numOfRows': '100',
-                'bidNm': keyword
-            }
-            
+        for api_tag, base_url in D2B_ENDPOINTS.items():
+            full_url = f"{base_url}?serviceKey={SERVICE_KEY}&pageNo=1&numOfRows=100&bidNm={keyword}"
             try:
-                response = requests.get(url, params=params, timeout=15)
+                response = requests.get(full_url, timeout=15)
                 if response.status_code == 200:
                     root = ET.fromstring(response.content)
                     items = root.findall('.//item')
@@ -159,7 +160,7 @@ def collect_and_fuse_bids():
                             clse_dt_str = item.findtext('rgstClseDt') 
                             if clse_dt_str and clse_dt_str.lower() != 'none' and len(clse_dt_str) >= 12:
                                 try:
-                                    clse_dt = datetime.strptime(clse_dt_str[:12], "%Y%m%d%H%M")
+                                    clse_dt = datetime.strptime(clse_dt_str[:12], "%Y%m%d%H%M").replace(tzinfo=KST)
                                     if kst_now > clse_dt:
                                         continue
                                     formatted_clse = f"{clse_dt_str[0:4]}-{clse_dt_str[4:6]}-{clse_dt_str[6:8]} {clse_dt_str[8:10]}:{clse_dt_str[10:12]}"
