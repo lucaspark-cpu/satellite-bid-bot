@@ -6,20 +6,26 @@ from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import xml.etree.ElementTree as ET
+from urllib.parse import unquote
 
 # ==========================================
 # 1. 시스템 통합 글로벌 설정
 # ==========================================
-RECEIVERS = ['lucas.park@dabeeo.com', 'joohyeon.kim@dabeeo.com']
+RECEIVERS = ['lucas.park@dabeeo.com']
+
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
+# requests 패키지 사용 시 중복 urlencoding을 방지하기 위해 unquote 수행
+RAW_SERVICE_KEY = unquote(SERVICE_KEY)
 
 SENDER_EMAIL = os.environ.get("SMTP_EMAIL", "lucas.park@dabeeo.com")
 SENDER_PASSWORD = os.environ.get("SMTP_PASSWORD", "yxphvbqxpucobyut")
 
+# [수정] 신규 차세대 나라장터 API (서비스ID 15129394) 엔드포인트 적용
 G2B_ENDPOINTS = {
-    '용역': 'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoServcPPSSrch',
-    '물품': 'http://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoThngPPSSrch'
+    '용역': 'https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPblancListInfoServcPPSSrch02',
+    '물품': 'https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPblancListInfoThngPPSSrch02'
 }
+
 D2B_ENDPOINTS = {
     '경쟁입찰': 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcCmpetBidPblancList',
     '공개수의': 'https://apis.data.go.kr/1690000/BidPblancInfoService/getDmstcOthbcVltrnNtatPlanList'
@@ -90,35 +96,49 @@ def collect_and_fuse_bids():
         # Part A: 나라장터(G2B) 데이터 수집
         for api_tag, url in G2B_ENDPOINTS.items():
             params = {
-                'ServiceKey': SERVICE_KEY, 'type': 'json', 'numOfRows': '50', 'pageNo': '1',
-                'inqryDiv': '1', 'inqryBgnDt': g2b_start, 'inqryEndDt': g2b_end,
-                'bidNtceNm': keyword, 'bidClseExcpYn': 'Y'
+                'serviceKey': RAW_SERVICE_KEY,  # [수정] 소문자 serviceKey 및 Raw 인증키 적용
+                'type': 'json',
+                'numOfRows': '50',
+                'pageNo': '1',
+                'inqryDiv': '1',
+                'inqryBgnDt': g2b_start,
+                'inqryEndDt': g2b_end,
+                'bidNtceNm': keyword,
+                'bidClseExcpYn': 'Y'
             }
             try:
                 res = requests.get(url, params=params, timeout=15)
-                if res.status_code == 200:
-                    items = res.json().get('response', {}).get('body', {}).get('items', [])
-                    if isinstance(items, dict): items = [items]
+                
+                # HTTP 에러 발생 시 GitHub Actions 로그에 출력
+                if res.status_code != 200:
+                    print(f"⚠️ G2B Error [{api_tag}-{keyword}] Code {res.status_code}: {res.text[:150]}", file=sys.stderr)
+                    continue
+
+                res_json = res.json()
+                items = res_json.get('response', {}).get('body', {}).get('items', [])
+                if isinstance(items, dict): 
+                    items = [items]
+                
+                for item in items:
+                    notice_no = item.get('bidNtceNo')
+                    title = item.get('bidNtceNm', '')
+                    if not notice_no: continue
                     
-                    for item in items:
-                        notice_no = item.get('bidNtceNo')
-                        title = item.get('bidNtceNm', '')
-                        if not notice_no: continue
-                        
-                        score, grade = evaluate_bid_grade(title)
-                        if score != -1:
-                            item['_api_type'] = f"G2B {api_tag}"
-                            item['formatted_url'] = item.get('bidNtceUrl', 'https://www.g2b.go.kr/')
-                            item['display_org'] = item.get('dminsttNm', '-')
-                            item['display_date'] = item.get('bidClseDt', '-')
-                            master_container[grade][notice_no] = item
-            except Exception:
+                    score, grade = evaluate_bid_grade(title)
+                    if score != -1:
+                        item['_api_type'] = f"G2B {api_tag}"
+                        item['formatted_url'] = item.get('bidNtceUrl', 'https://www.g2b.go.kr/')
+                        item['display_org'] = item.get('dminsttNm', '-')
+                        item['display_date'] = item.get('bidClseDt', '-')
+                        master_container[grade][notice_no] = item
+            except Exception as e:
+                print(f"❌ G2B Exception [{api_tag}-{keyword}]: {e}", file=sys.stderr)
                 continue
 
         # Part B: 국방전자조달(D2B) 수집
         for api_tag, url in D2B_ENDPOINTS.items():
             params = {
-                'serviceKey': SERVICE_KEY,
+                'serviceKey': RAW_SERVICE_KEY,  # [수정] 동일한 Raw 인증키 사용
                 'pageNo': '1',
                 'numOfRows': '100',
                 'bidNm': keyword
