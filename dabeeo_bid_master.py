@@ -13,14 +13,12 @@ from urllib.parse import unquote
 # ==========================================
 RECEIVERS = ['lucas.park@dabeeo.com']
 
-# 공공데이터포털 발급 키 (requests.get params에 전달하기 위해 Raw Key로 unquote)
 SERVICE_KEY = '+emmedaZrwpwK2FqtKT9BiUA9/qWfUYkm3pFh/w95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg=='
 RAW_SERVICE_KEY = unquote(SERVICE_KEY)
 
 SENDER_EMAIL = os.environ.get("SMTP_EMAIL", "lucas.park@dabeeo.com")
 SENDER_PASSWORD = os.environ.get("SMTP_PASSWORD", "yxphvbqxpucobyut")
 
-# [차세대 나라장터 API 15129394 EndPoint]
 G2B_ENDPOINTS = {
     '용역': 'https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPblancListInfoServcPPSSrch02',
     '물품': 'https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPblancListInfoThngPPSSrch02'
@@ -33,9 +31,6 @@ D2B_ENDPOINTS = {
 
 KEYWORDS = ['위성', '공간정보', 'AI', '드론', '영상', '모니터링', '변화']
 
-# ==========================================
-# 2. 다비오 고도화 스코어링
-# ==========================================
 NEGATIVE_KEYWORDS = [
     "장치", "기념", "콘텐츠", "설치", "문화", "의료", "홍보", "방송", "초음파", "여행", 
     "시설", "의학", "드라마", "스포츠", "자막", "행사", "제조설비", "공장생산", "공장등록", 
@@ -49,6 +44,10 @@ HIGH_WEIGHT_KEYWORDS = ["영상", "분석", "AI", "인공지능", "공간정보"
 MID_WEIGHT_KEYWORDS = ["위성", "상용위성", "드론", "무인기", "정찰", "감시", "시스템", "정보", "구축", "해양"]
 
 def evaluate_bid_grade(title):
+    # 1. 키워드 매칭 여부 우선 체크
+    if not any(k in title for k in KEYWORDS):
+        return -1, "제외"
+
     clean_title = title.replace(" ", "")
     for nk in NEGATIVE_KEYWORDS:
         if nk in title or nk in clean_title:
@@ -74,80 +73,70 @@ def evaluate_bid_grade(title):
         return -1, "제외"
 
 # ==========================================
-# 3. 데이터 융합 엔진 
+# 3. 데이터 융합 엔진 (단 2회 호출 구조)
 # ==========================================
 def collect_and_fuse_bids():
     kst_now = datetime.utcnow() + timedelta(hours=9)
-    seven_days_ago = kst_now - timedelta(days=7)
+    seven_days_ago = kst_now - timedelta(days=3) # 최근 3일로 조율하여 초고속 처리
     
-    # [수정 1] 차세대 G2B 필수 규격: 8자리 날짜 (YYYYMMDD)
-    g2b_start = seven_days_ago.strftime('%Y%m%d')
-    g2b_end = kst_now.strftime('%Y%m%d')
-
-    print(f"ℹ️ [조회 기간] {g2b_start} ~ {g2b_end}")
+    g2b_start = seven_days_ago.strftime('%Y%m%d0000')
+    g2b_end = kst_now.strftime('%Y%m%d2359')
 
     master_container = {
         "상 (핵심 타겟) 🎯": {},
         "중 (검토 권장) 🔍": {}
     }
 
+    # Part A: 나라장터(G2B) - 키워드 없이 통째로 1번씩만 조회 (총 2회)
+    for api_tag, url in G2B_ENDPOINTS.items():
+        params = {
+            'serviceKey': RAW_SERVICE_KEY,
+            'type': 'json',
+            'numOfRows': '100', # 최근 공고 100건 통으로 수집
+            'pageNo': '1',
+            'inqryDiv': '1',
+            'inqryBgnDt': g2b_start,
+            'inqryEndDt': g2b_end,
+            'bidClseExcpYn': 'Y'
+        }
+        try:
+            res = requests.get(url, params=params, timeout=10)
+            if res.status_code == 200:
+                res_json = res.json()
+                items = res_json.get('response', {}).get('body', {}).get('items', [])
+                if isinstance(items, dict): items = [items]
+                elif not isinstance(items, list): items = []
+                
+                print(f"⚡ [G2B {api_tag}] 전체 공고 {len(items)}건 수집 완료 -> 내부 필터링 시작")
+
+                for item in items:
+                    notice_no = item.get('bidNtceNo')
+                    title = item.get('bidNtceNm', '')
+                    if not notice_no: continue
+                    
+                    score, grade = evaluate_bid_grade(title)
+                    if score != -1:
+                        item['_api_type'] = f"G2B {api_tag}"
+                        item['formatted_url'] = item.get('bidNtceUrl', 'https://www.g2b.go.kr/')
+                        item['display_org'] = item.get('dminsttNm', '-')
+                        item['display_date'] = item.get('bidClseDt', '-')
+                        master_container[grade][notice_no] = item
+            else:
+                print(f"⚠️ G2B Error [{api_tag}] Code: {res.status_code}")
+        except Exception as e:
+            print(f"❌ G2B Exception [{api_tag}]: {e}")
+
+    # Part B: 국방전자조달(D2B) 수집
     for keyword in KEYWORDS:
-        # Part A: 나라장터(G2B) 데이터 수집
-        for api_tag, url in G2B_ENDPOINTS.items():
-            # [수정 2] requests params 디셔너리로 안전한 전달
-            params = {
-                'serviceKey': RAW_SERVICE_KEY,
-                'type': 'json',
-                'numOfRows': '50',
-                'pageNo': '1',
-                'inqryDiv': '1',
-                'inqryBgnDt': g2b_start,
-                'inqryEndDt': g2b_end,
-                'bidNtceNm': keyword,
-                'bidClseExcpYn': 'Y'
-            }
-            try:
-                res = requests.get(url, params=params, timeout=15)
-                if res.status_code == 200:
-                    res_json = res.json()
-                    body = res_json.get('response', {}).get('body', {})
-                    items = body.get('items', [])
-                    
-                    # [수정 3] 단건/다건/빈값 유연한 파싱
-                    if isinstance(items, dict):
-                        items = [items]
-                    elif not isinstance(items, list):
-                        items = []
-                    
-                    print(f"🔎 [G2B {api_tag}-{keyword}] 검색 결과 수: {len(items)}건")
-
-                    for item in items:
-                        notice_no = item.get('bidNtceNo')
-                        title = item.get('bidNtceNm', '')
-                        if not notice_no: continue
-                        
-                        score, grade = evaluate_bid_grade(title)
-                        if score != -1:
-                            item['_api_type'] = f"G2B {api_tag}"
-                            item['formatted_url'] = item.get('bidNtceUrl', 'https://www.g2b.go.kr/')
-                            item['display_org'] = item.get('dminsttNm', '-')
-                            item['display_date'] = item.get('bidClseDt', '-')
-                            master_container[grade][notice_no] = item
-                else:
-                    print(f"⚠️ G2B HTTP Error [{api_tag}-{keyword}]: {res.status_code}", file=sys.stderr)
-            except Exception as e:
-                print(f"❌ G2B Exception [{api_tag}-{keyword}]: {e}", file=sys.stderr)
-
-        # Part B: 국방전자조달(D2B) 수집
         for api_tag, url in D2B_ENDPOINTS.items():
             params = {
                 'serviceKey': RAW_SERVICE_KEY,
                 'pageNo': '1',
-                'numOfRows': '100',
+                'numOfRows': '50',
                 'bidNm': keyword
             }
             try:
-                response = requests.get(url, params=params, timeout=15)
+                response = requests.get(url, params=params, timeout=10)
                 if response.status_code == 200:
                     root = ET.fromstring(response.content)
                     items = root.findall('.//item')
@@ -162,8 +151,7 @@ def collect_and_fuse_bids():
                             if clse_dt_str and clse_dt_str.lower() != 'none' and len(clse_dt_str) >= 12:
                                 try:
                                     clse_dt = datetime.strptime(clse_dt_str[:12], "%Y%m%d%H%M")
-                                    if kst_now > clse_dt:
-                                        continue
+                                    if kst_now > clse_dt: continue
                                     formatted_clse = f"{clse_dt_str[0:4]}-{clse_dt_str[4:6]}-{clse_dt_str[6:8]} {clse_dt_str[8:10]}:{clse_dt_str[10:12]}"
                                 except Exception:
                                     formatted_clse = clse_dt_str
@@ -196,13 +184,13 @@ def collect_and_fuse_bids():
     return master_container, keyword_str
 
 # ==========================================
-# 4. HTML 리포트 UI 생성 및 개별 전송
+# 4. HTML 리포트 UI 생성 및 발송
 # ==========================================
 def build_html_and_dispatch():
     container, keyword_str = collect_and_fuse_bids()
     total_count = sum(len(bids) for bids in container.values())
     
-    print(f"📊 최종 수집 및 분류된 유효 공고 수: {total_count}건")
+    print(f"📊 최종 수집 성공: {total_count}건")
 
     subject = "📢 [나라장터/D2B 통합본] 다비오 맞춤형 신안보/공공 공고 인텔리전스"
     
