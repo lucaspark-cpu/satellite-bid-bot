@@ -22,8 +22,8 @@ SENDER_PASSWORD = os.environ.get("SMTP_PASSWORD", "yxphvbqxpucobyut")
 
 # [수정] 신규 차세대 나라장터 API (서비스ID 15129394) 엔드포인트 적용
 G2B_ENDPOINTS = {
-    '용역': 'https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPblancListInfoServcPPSSrch02',
-    '물품': 'https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPblancListInfoThngPPSSrch02'
+    '용역': 'https://apis.data.go.kr/1230000/BidPublicInfoService03/getBidPblancListInfoServcPPSSrch02',
+    '물품': 'https://apis.data.go.kr/1230000/BidPublicInfoService03/getBidPblancListInfoThngPPSSrch02'
 }
 
 D2B_ENDPOINTS = {
