@@ -4,13 +4,17 @@ import sqlite3
 import datetime
 import urllib.parse
 
-# 1. API 인증키 설정 (원문 디코딩 상태로 안전하게 변환)
+# 1. API 인증키 설정 (원문 디코딩 상태로 안전하게 전달)
 RAW_SERVICE_KEY = "%2BemmedaZrwpwK2FqtKT9BiUA9%2FqWfUYkm3pFh%2Fw95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg%3D%3D"
 SERVICE_KEY = urllib.parse.unquote(RAW_SERVICE_KEY)
 
-# API Endpoints (12번: 용역 검색, 20번: e발주 첨부파일)
-G2B_SERVC_SEARCH_URL = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServcPPSSrch"
-G2B_FILE_URL = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoEorderAtchFileInfo"
+# 2. 명세서 기반 정확한 Base URL 및 오퍼레이션 URL 설정
+BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
+
+# 12번: 나라장터검색조건에 의한 입찰공고 용역 조회
+G2B_SERVC_SEARCH_URL = f"{BASE_URL}/getBidPblancListInfoServcPPSSrch"
+# 20번: 입찰공고목록 정보에 대한 e발주 첨부파일 정보 조회
+G2B_FILE_URL = f"{BASE_URL}/getBidPblancListInfoEorderAtchFileInfo"
 
 DB_FILE = "g2b_bids.db"
 SEARCH_KEYWORDS = ["위성", "공간정보", "AI", "영상", "다비오"]
@@ -34,11 +38,13 @@ def init_db():
     conn.close()
 
 def fetch_rfp_file(bid_no):
+    """20번: e발주 첨부파일정보조회"""
     params = {
         'serviceKey': SERVICE_KEY,
+        'inqryDiv': '2',        # 2: 입찰공고번호 검색
+        'bidNtceNo': bid_no,
         'numOfRows': '10',
         'pageNo': '1',
-        'bidNtceNo': bid_no,
         'type': 'json'
     }
     try:
@@ -51,23 +57,25 @@ def fetch_rfp_file(bid_no):
         
         if items:
             file_info = items[0] if isinstance(items, list) else items
-            return file_info.get('eOrderAtchFileUrl', ''), file_info.get('eOrderAtchFileNm', '제안요청서')
+            return file_info.get('eorderAtchFileUrl', ''), file_info.get('eorderAtchFileNm', '제안요청서')
     except Exception as e:
         print(f"[WARN] RFP file fetch failed for {bid_no}: {e}")
     
     return "", ""
 
 def fetch_g2b_servc_bids(days_back=1):
+    """12번: 나라장터검색조건에 의한 입찰공고용역조회"""
     now = datetime.datetime.now()
     start_date = (now - datetime.timedelta(days=days_back)).strftime("%Y%m%d0000")
     end_date = now.strftime("%Y%m%d2359")
 
     params = {
         'serviceKey': SERVICE_KEY,
+        'inqryDiv': '1',        # 1: 공고게시일시 검색
+        'inqryBgnDt': start_date,
+        'inqryEndDt': end_date,
         'numOfRows': '100',
         'pageNo': '1',
-        'inptStrtDt': start_date,
-        'inptEndDt': end_date,
         'type': 'json'
     }
 
