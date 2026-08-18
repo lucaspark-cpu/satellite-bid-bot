@@ -4,11 +4,11 @@ import sqlite3
 import datetime
 import urllib.parse
 
-# 1. API 인증키 설정
+# 1. API 인증키 설정 (원문 디코딩 상태로 안전하게 변환)
 RAW_SERVICE_KEY = "%2BemmedaZrwpwK2FqtKT9BiUA9%2FqWfUYkm3pFh%2Fw95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg%3D%3D"
-SERVICE_KEY = urllib.parse.quote(RAW_SERVICE_KEY, safe='') if "%" not in RAW_SERVICE_KEY else RAW_SERVICE_KEY
+SERVICE_KEY = urllib.parse.unquote(RAW_SERVICE_KEY)
 
-# API Endpoints (12번, 20번)
+# API Endpoints (12번: 용역 검색, 20번: e발주 첨부파일)
 G2B_SERVC_SEARCH_URL = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServcPPSSrch"
 G2B_FILE_URL = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoEorderAtchFileInfo"
 
@@ -16,7 +16,6 @@ DB_FILE = "g2b_bids.db"
 SEARCH_KEYWORDS = ["위성", "공간정보", "AI", "영상", "다비오"]
 
 def init_db():
-    """입찰 공고 및 RFP 첨부파일 URL 저장 테이블 초기화"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('''
@@ -35,9 +34,8 @@ def init_db():
     conn.close()
 
 def fetch_rfp_file(bid_no):
-    """20번 API: 공고번호로 e발주 첨부파일(RFP) URL 및 파일명 조회"""
     params = {
-        'serviceKey': urllib.parse.unquote(SERVICE_KEY),
+        'serviceKey': SERVICE_KEY,
         'numOfRows': '10',
         'pageNo': '1',
         'bidNtceNo': bid_no,
@@ -60,13 +58,12 @@ def fetch_rfp_file(bid_no):
     return "", ""
 
 def fetch_g2b_servc_bids(days_back=1):
-    """12번 API: 용역 입찰 공고 검색 및 키워드 필터링"""
     now = datetime.datetime.now()
     start_date = (now - datetime.timedelta(days=days_back)).strftime("%Y%m%d0000")
     end_date = now.strftime("%Y%m%d2359")
 
     params = {
-        'serviceKey': urllib.parse.unquote(SERVICE_KEY),
+        'serviceKey': SERVICE_KEY,
         'numOfRows': '100',
         'pageNo': '1',
         'inptStrtDt': start_date,
@@ -108,7 +105,6 @@ def fetch_g2b_servc_bids(days_back=1):
         return []
 
 def save_bids_to_db(bids):
-    """신규 공고 건만 DB에 저장"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     new_count = 0
