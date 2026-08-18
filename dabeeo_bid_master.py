@@ -4,20 +4,23 @@ import sqlite3
 import datetime
 import urllib.parse
 
-# 1. API 인증키 설정 (원문 디코딩 상태로 안전하게 전달)
+# 1. API 인증키 및 Endpoint 설정
 RAW_SERVICE_KEY = "%2BemmedaZrwpwK2FqtKT9BiUA9%2FqWfUYkm3pFh%2Fw95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg%3D%3D"
 SERVICE_KEY = urllib.parse.unquote(RAW_SERVICE_KEY)
 
-# 2. 명세서 기반 정확한 Base URL 및 오퍼레이션 URL 설정
 BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
-
-# 12번: 나라장터검색조건에 의한 입찰공고 용역 조회
 G2B_SERVC_SEARCH_URL = f"{BASE_URL}/getBidPblancListInfoServcPPSSrch"
-# 20번: 입찰공고목록 정보에 대한 e발주 첨부파일 정보 조회
 G2B_FILE_URL = f"{BASE_URL}/getBidPblancListInfoEorderAtchFileInfo"
 
 DB_FILE = "g2b_bids.db"
-SEARCH_KEYWORDS = ["위성", "공간정보", "AI", "영상", "다비오"]
+
+# 2. 스코어링 & 키워드 설정 (README 명세 기준)
+HIGH_TARGET_KEYWORDS = ["위성", "드론", "공간정보"]
+WEIGHT_KEYWORDS = ["AI", "영상", "모니터링", "변화", "다비오", "인공지능", "딥러닝", "지도"]
+NEGATIVE_KEYWORDS = [
+    "제조", "공사", "서버", "하드웨어", "청소", "폐기물", "경비", "소방", 
+    "급식", "피복", "인쇄", "차량", "임대", "배관", "전기공사"
+]
 
 def init_db():
     conn = sqlite3.connect(DB_FILE)
@@ -31,17 +34,48 @@ def init_db():
             bid_url TEXT,
             rfp_file_url TEXT,
             rfp_file_name TEXT,
+            score INTEGER DEFAULT 0,
+            grade TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     conn.commit()
     conn.close()
 
+def calculate_score_and_grade(bid_title):
+    """README 명세 기반 연관도 스코어링 및 등급 산정"""
+    # 네거티브 필터링: 제외 키워드 포함 시 자동 탈락 (0점, None)
+    if any(neg in bid_title for neg in NEGATIVE_KEYWORDS):
+        return 0, None
+
+    score = 0
+    grade = "중"
+
+    # 가중치 키워드 점수 부여
+    for kw in WEIGHT_KEYWORDS:
+        if kw in bid_title:
+            score += 10
+
+    # 핵심 타겟 키워드 포함 여부 검사
+    has_high_target = any(high_kw in bid_title for high_kw in HIGH_TARGET_KEYWORDS)
+    for high_kw in HIGH_TARGET_KEYWORDS:
+        if high_kw in bid_title:
+            score += 20
+
+    if has_high_target:
+        grade = "상"
+
+    # 키워드가 하나도 안 맞으면 제외
+    if score == 0:
+        return 0, None
+
+    return score, grade
+
 def fetch_rfp_file(bid_no):
-    """20번: e발주 첨부파일정보조회"""
+    """20번 API: e발주 첨부파일(RFP) URL 및 파일명 조회"""
     params = {
         'serviceKey': SERVICE_KEY,
-        'inqryDiv': '2',        # 2: 입찰공고번호 검색
+        'inqryDiv': '2',
         'bidNtceNo': bid_no,
         'numOfRows': '10',
         'pageNo': '1',
@@ -64,14 +98,14 @@ def fetch_rfp_file(bid_no):
     return "", ""
 
 def fetch_g2b_servc_bids(days_back=1):
-    """12번: 나라장터검색조건에 의한 입찰공고용역조회"""
+    """12번 API: 용역 입찰 공고 수집 및 스코어링 적용"""
     now = datetime.datetime.now()
     start_date = (now - datetime.timedelta(days=days_back)).strftime("%Y%m%d0000")
     end_date = now.strftime("%Y%m%d2359")
 
     params = {
         'serviceKey': SERVICE_KEY,
-        'inqryDiv': '1',        # 1: 공고게시일시 검색
+        'inqryDiv': '1',
         'inqryBgnDt': start_date,
         'inqryEndDt': end_date,
         'numOfRows': '100',
@@ -91,7 +125,10 @@ def fetch_g2b_servc_bids(days_back=1):
         filtered_bids = []
         for item in items:
             bid_title = item.get('bidNtceNm', '')
-            if any(keyword in bid_title for keyword in SEARCH_KEYWORDS):
+            
+            # 스코어 및 등급 계산
+            score, grade = calculate_score_and_grade(bid_title)
+            if grade is not None:
                 bid_no = item.get('bidNtceNo', '')
                 rfp_url, rfp_name = fetch_rfp_file(bid_no)
                 
@@ -102,7 +139,10 @@ def fetch_g2b_servc_bids(days_back=1):
                     'bid_date': item.get('bidNtceDt', ''),
                     'bid_url': item.get('bidNtceDtlUrl', ''),
                     'rfp_file_url': rfp_url,
-                    'rfp_file_name': rfp_name
+                    'rfp_file_name': rfp_name,
+                    'score': score,
+                    'grade': grade,
+                    'source': 'G2B'
                 }
                 filtered_bids.append(bid_info)
 
@@ -121,8 +161,8 @@ def save_bids_to_db(bids):
         cursor.execute("SELECT bid_no FROM bids WHERE bid_no = ?", (bid['bid_no'],))
         if not cursor.fetchone():
             cursor.execute('''
-                INSERT INTO bids (bid_no, bid_name, order_agency, bid_date, bid_url, rfp_file_url, rfp_file_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO bids (bid_no, bid_name, order_agency, bid_date, bid_url, rfp_file_url, rfp_file_name, score, grade)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 bid['bid_no'], 
                 bid['bid_name'], 
@@ -130,7 +170,9 @@ def save_bids_to_db(bids):
                 bid['bid_date'], 
                 bid['bid_url'],
                 bid.get('rfp_file_url', ''),
-                bid.get('rfp_file_name', '')
+                bid.get('rfp_file_name', ''),
+                bid.get('score', 0),
+                bid.get('grade', '중')
             ))
             new_count += 1
 
@@ -140,7 +182,7 @@ def save_bids_to_db(bids):
 
 if __name__ == "__main__":
     init_db()
-    print("나라장터 용역 입찰 공고 수집 시작...")
+    print("나라장터 용역 입찰 공고 스코어링 수집 시작...")
     bids = fetch_g2b_servc_bids()
     new_added = save_bids_to_db(bids)
-    print(f"수집 완료: 총 {len(bids)}건 중 신규 {new_added}건 저장됨.")
+    print(f"수집 완료: 총 {len(bids)}건 유효 공고 수집 (신규 {new_added}건 저장됨).")
