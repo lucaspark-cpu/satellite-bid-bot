@@ -15,8 +15,8 @@ G2B_FILE_URL = f"{BASE_URL}/getBidPblancListInfoEorderAtchFileInfo"
 DB_FILE = "g2b_bids.db"
 
 # 2. 스코어링 & 키워드 설정 (README 명세 기준)
-HIGH_TARGET_KEYWORDS = ["위성", "드론", "공간정보"]
-WEIGHT_KEYWORDS = ["AI", "영상", "모니터링", "변화", "다비오", "인공지능", "딥러닝", "지도"]
+HIGH_TARGET_KEYWORDS = ["위성", "드론", "공간정보", "변화탐지", "영상분석"]
+WEIGHT_KEYWORDS = [ "ICT", "AI", "ODA", "영상", "모니터링", "변화", "다비오", "인공지능", "딥러닝", "지도", "시스템"]
 NEGATIVE_KEYWORDS = [
     "제조", "공사", "서버", "하드웨어", "청소", "폐기물", "경비", "소방", 
     "급식", "피복", "인쇄", "차량", "임대", "배관", "전기공사"
