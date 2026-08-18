@@ -4,18 +4,21 @@ import sqlite3
 import datetime
 import urllib.parse
 
-# 1. API 인증키 설정 및 URL Encoded 처리
-RAW_SERVICE_KEY = "https://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblcnInfoList01" # 사용자 발급 키
+# 1. API 인증키 설정
+RAW_SERVICE_KEY = "https://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblcnInfoList01" # 활용신청한 서비스키
 SERVICE_KEY = urllib.parse.quote(RAW_SERVICE_KEY, safe='') if "%" not in RAW_SERVICE_KEY else RAW_SERVICE_KEY
 
-G2B_BASE_URL = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblcnInfoList01"
-DB_FILE = "g2b_bids.db"
+# API Endpoints
+# 12번: 나라장터검색조건에 의한 입찰공고 용역 조회
+G2B_SERVC_SEARCH_URL = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServcPPSSrch"
+# 20번: 입찰공고목록 정보에 대한 e발주 첨부파일 정보 조회
+G2B_FILE_URL = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoEorderAtchFileInfo"
 
-# 검색 키워드 설정 (위성/공간정보 관련)
+DB_FILE = "g2b_bids.db"
 SEARCH_KEYWORDS = ["위성", "공간정보", "AI", "영상", "다비오"]
 
 def init_db():
-    """입찰 공고 정보를 저장할 SQLite DB 초기화"""
+    """입찰 공고 및 RFP 첨부파일 URL 저장 테이블 초기화"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     cursor.execute('''
@@ -25,14 +28,42 @@ def init_db():
             order_agency TEXT,
             bid_date TEXT,
             bid_url TEXT,
+            rfp_file_url TEXT,
+            rfp_file_name TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     ''')
     conn.commit()
     conn.close()
 
-def fetch_g2b_bids(days_back=1):
-    """G2B OpenAPI를 호출하여 지정된 일수만큼의 입찰 공고 수집"""
+def fetch_rfp_file(bid_no):
+    """20번 API: 공고번호로 e발주 첨부파일(RFP/과업지시서) URL 및 파일명 조회"""
+    params = {
+        'serviceKey': urllib.parse.unquote(SERVICE_KEY),
+        'numOfRows': '10',
+        'pageNo': '1',
+        'bidNtceNo': bid_no,
+        'type': 'json'
+    }
+    try:
+        res = requests.get(G2B_FILE_URL, params=params, timeout=10)
+        res.raise_for_status()
+        data = res.json()
+        items = data.get('response', {}).get('body', {}).get('items', [])
+        if isinstance(items, dict):
+            items = items.get('item', [])
+        
+        if items:
+            # 첫 번째 첨부파일 정보 추출
+            file_info = items[0] if isinstance(items, list) else items
+            return file_info.get('eOrderAtchFileUrl', ''), file_info.get('eOrderAtchFileNm', '제안요청서')
+    except Exception as e:
+        print(f"[WARN] RFP file fetch failed for {bid_no}: {e}")
+    
+    return "", ""
+
+def fetch_g2b_servc_bids(days_back=1):
+    """12번 API: 용역 입찰 공고 검색 및 키워드 필터링"""
     now = datetime.datetime.now()
     start_date = (now - datetime.timedelta(days=days_back)).strftime("%Y%m%d0000")
     end_date = now.strftime("%Y%m%d2359")
@@ -41,14 +72,13 @@ def fetch_g2b_bids(days_back=1):
         'serviceKey': urllib.parse.unquote(SERVICE_KEY),
         'numOfRows': '100',
         'pageNo': '1',
-        'inptDtOrder': 'DESC',
         'inptStrtDt': start_date,
         'inptEndDt': end_date,
         'type': 'json'
     }
 
     try:
-        response = requests.get(G2B_BASE_URL, params=params, timeout=15)
+        response = requests.get(G2B_SERVC_SEARCH_URL, params=params, timeout=15)
         response.raise_for_status()
         data = response.json()
 
@@ -60,23 +90,28 @@ def fetch_g2b_bids(days_back=1):
         for item in items:
             bid_title = item.get('bidNtceNm', '')
             if any(keyword in bid_title for keyword in SEARCH_KEYWORDS):
+                bid_no = item.get('bidNtceNo', '')
+                rfp_url, rfp_name = fetch_rfp_file(bid_no)
+                
                 bid_info = {
-                    'bid_no': item.get('bidNtceNo', ''),
+                    'bid_no': bid_no,
                     'bid_name': bid_title,
                     'order_agency': item.get('ntceInsttNm', '미지정'),
                     'bid_date': item.get('bidNtceDt', ''),
-                    'bid_url': item.get('bidNtceDtlUrl', '')
+                    'bid_url': item.get('bidNtceDtlUrl', ''),
+                    'rfp_file_url': rfp_url,
+                    'rfp_file_name': rfp_name
                 }
                 filtered_bids.append(bid_info)
 
         return filtered_bids
 
     except Exception as e:
-        print(f"[ERROR] API Request failed: {e}")
+        print(f"[ERROR] G2B API Request failed: {e}")
         return []
 
 def save_bids_to_db(bids):
-    """신규 공고 건만 DB에 저장 및 새로 추가된 건수 반환"""
+    """신규 용역 공고 저장"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     new_count = 0
@@ -85,9 +120,17 @@ def save_bids_to_db(bids):
         cursor.execute("SELECT bid_no FROM bids WHERE bid_no = ?", (bid['bid_no'],))
         if not cursor.fetchone():
             cursor.execute('''
-                INSERT INTO bids (bid_no, bid_name, order_agency, bid_date, bid_url)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (bid['bid_no'], bid['bid_name'], bid['order_agency'], bid['bid_date'], bid['bid_url']))
+                INSERT INTO bids (bid_no, bid_name, order_agency, bid_date, bid_url, rfp_file_url, rfp_file_name)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                bid['bid_no'], 
+                bid['bid_name'], 
+                bid['order_agency'], 
+                bid['bid_date'], 
+                bid['bid_url'],
+                bid.get('rfp_file_url', ''),
+                bid.get('rfp_file_name', '')
+            ))
             new_count += 1
 
     conn.commit()
@@ -96,7 +139,7 @@ def save_bids_to_db(bids):
 
 if __name__ == "__main__":
     init_db()
-    print("나라장터 입찰 공고 수집 시작...")
-    bids = fetch_g2b_bids()
+    print("나라장터 용역 입찰 공고 및 RFP 수집 시작...")
+    bids = fetch_g2b_servc_bids()
     new_added = save_bids_to_db(bids)
-    print(f"수집 완료: 총 {len(bids)}건 중 신규 공고 {new_added}건 저장됨.")
+    print(f"수집 완료: 총 {len(bids)}건 중 신규 {new_added}건 저장됨.")
