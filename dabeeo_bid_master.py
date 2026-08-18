@@ -5,13 +5,11 @@ import datetime
 import urllib.parse
 
 # 1. API 인증키 설정
-RAW_SERVICE_KEY = "https://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblcnInfoList01" # 활용신청한 서비스키
+RAW_SERVICE_KEY = "%2BemmedaZrwpwK2FqtKT9BiUA9%2FqWfUYkm3pFh%2Fw95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg%3D%3D"
 SERVICE_KEY = urllib.parse.quote(RAW_SERVICE_KEY, safe='') if "%" not in RAW_SERVICE_KEY else RAW_SERVICE_KEY
 
-# API Endpoints
-# 12번: 나라장터검색조건에 의한 입찰공고 용역 조회
+# API Endpoints (12번, 20번)
 G2B_SERVC_SEARCH_URL = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServcPPSSrch"
-# 20번: 입찰공고목록 정보에 대한 e발주 첨부파일 정보 조회
 G2B_FILE_URL = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoEorderAtchFileInfo"
 
 DB_FILE = "g2b_bids.db"
@@ -37,7 +35,7 @@ def init_db():
     conn.close()
 
 def fetch_rfp_file(bid_no):
-    """20번 API: 공고번호로 e발주 첨부파일(RFP/과업지시서) URL 및 파일명 조회"""
+    """20번 API: 공고번호로 e발주 첨부파일(RFP) URL 및 파일명 조회"""
     params = {
         'serviceKey': urllib.parse.unquote(SERVICE_KEY),
         'numOfRows': '10',
@@ -54,7 +52,6 @@ def fetch_rfp_file(bid_no):
             items = items.get('item', [])
         
         if items:
-            # 첫 번째 첨부파일 정보 추출
             file_info = items[0] if isinstance(items, list) else items
             return file_info.get('eOrderAtchFileUrl', ''), file_info.get('eOrderAtchFileNm', '제안요청서')
     except Exception as e:
@@ -111,7 +108,7 @@ def fetch_g2b_servc_bids(days_back=1):
         return []
 
 def save_bids_to_db(bids):
-    """신규 용역 공고 저장"""
+    """신규 공고 건만 DB에 저장"""
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     new_count = 0
@@ -139,7 +136,7 @@ def save_bids_to_db(bids):
 
 if __name__ == "__main__":
     init_db()
-    print("나라장터 용역 입찰 공고 및 RFP 수집 시작...")
+    print("나라장터 용역 입찰 공고 수집 시작...")
     bids = fetch_g2b_servc_bids()
     new_added = save_bids_to_db(bids)
     print(f"수집 완료: 총 {len(bids)}건 중 신규 {new_added}건 저장됨.")
