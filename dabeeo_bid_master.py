@@ -1,208 +1,79 @@
-import os
-import time
-import requests
-import sqlite3
-import datetime
-import urllib.parse
+import re
 
-# 1. API 인증키 및 Endpoint 설정
-RAW_SERVICE_KEY = "%2BemmedaZrwpwK2FqtKT9BiUA9%2FqWfUYkm3pFh%2Fw95QRP5V6qSAjjO2dJaLJnOZ7KdAssIS6mspZr0STsYfv8dg%3D%3D"
-SERVICE_KEY = urllib.parse.unquote(RAW_SERVICE_KEY)
-
-BASE_URL = "http://apis.data.go.kr/1230000/ad/BidPublicInfoService"
-G2B_SERVC_SEARCH_URL = f"{BASE_URL}/getBidPblancListInfoServcPPSSrch"
-G2B_FILE_URL = f"{BASE_URL}/getBidPblancListInfoEorderAtchFileInfo"
-
-DB_FILE = "g2b_bids.db"
-
-# 2. 스코어링 및 키워드 설정 (다비오 도메인 맞춤 확장)
-HIGH_TARGET_KEYWORDS = ["위성", "드론", "공간정보", "도미니카", "국립공원", "기하보정", "정사보정"]
-WEIGHT_KEYWORDS = [
-    "AI", "영상", "모니터링", "변화", "다비오", "인공지능", "딥러닝", "지도", "수치지형도", "콘텐츠",
-    "ICT", "기후변화", "국제협력", "ODA", "생태", "산림", "환경", "알고리즘", "SW", "모듈"
-]
-
-# 네거티브 키워드 (단순 시설/물품/노무 공고 제거, 모듈/SW 등은 제거 대상에서 제외)
-NEGATIVE_KEYWORDS = [
-    "제조", "공사", "서버", "하드웨어", "청소", "폐기물", "경비", "소방", 
-    "급식", "피복", "인쇄", "차량", "임대", "배관", "전기공사"
-]
-
-def init_db():
-    """SQLite DB 테이블 초기화"""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS bids (
-            bid_no TEXT PRIMARY KEY,
-            bid_name TEXT,
-            order_agency TEXT,
-            bid_date TEXT,
-            bid_url TEXT,
-            rfp_file_url TEXT,
-            rfp_file_name TEXT,
-            score INTEGER DEFAULT 0,
-            grade TEXT,
-            source TEXT DEFAULT 'G2B',
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    ''')
-    conn.commit()
-    conn.close()
-
-def calculate_score_and_grade(bid_title):
-    """연관도 스코어링 및 등급 산정"""
-    # 네거티브 필터링: 단순 하드웨어/시설/노무 공고 탈락
-    if any(neg in bid_title for neg in NEGATIVE_KEYWORDS):
-        return 0, None
-
-    score = 0
-    grade = "중"
-
-    # 가중치 키워드
-    for kw in WEIGHT_KEYWORDS:
-        if kw in bid_title:
-            score += 10
-
-    # 핵심 타겟 키워드 (상 등급 부여)
-    has_high_target = any(high_kw in bid_title for high_kw in HIGH_TARGET_KEYWORDS)
-    for high_kw in HIGH_TARGET_KEYWORDS:
-        if high_kw in bid_title:
-            score += 20
-
-    if has_high_target:
-        grade = "상"
-
-    if score == 0:
-        return 0, None
-
-    return score, grade
-
-def fetch_rfp_file(bid_no):
-    """20번 API: e발주 첨부파일(RFP) URL 및 파일명 조회"""
-    params = {
-        'serviceKey': SERVICE_KEY,
-        'inqryDiv': '2',
-        'bidNtceNo': bid_no,
-        'numOfRows': '10',
-        'pageNo': '1',
-        'type': 'json'
-    }
-    try:
-        res = requests.get(G2B_FILE_URL, params=params, timeout=10)
-        res.raise_for_status()
-        data = res.json()
-        items = data.get('response', {}).get('body', {}).get('items', [])
-        if isinstance(items, dict):
-            items = items.get('item', [])
-        
-        if items:
-            file_info = items[0] if isinstance(items, list) else items
-            return file_info.get('eorderAtchFileUrl', ''), file_info.get('eorderAtchFileNm', '제안요청서')
-    except Exception:
-        pass
+# 1. 단일 키워드 가중치 정의
+KEYWORD_WEIGHTS = {
+    # ── [핵심 기술 & 데이터] ──
+    "위성": 15, "초소형위성": 20, "국토위성": 20, "항공사진": 15, "정사영상": 15,
+    "공간정보": 12, "지능공간": 15, "디지털트윈": 12, "디지털 트윈": 12, "GIS": 10,
+    "원격탐사": 15, "Geospatial": 15, "Remote Sensing": 15, "SAR": 15, "EO": 10,
     
-    return "", ""
+    # ── [AI & 데이터 처리] ──
+    "AI": 10, "인공지능": 10, "비전": 10, "Vision": 10, "에이전틱": 15,
+    "학습데이터": 12, "데이터셋": 12, "변화탐지": 15, "객체식별": 15, "판독": 12,
+    "초해상화": 15, "품질관리": 8, "자동화": 8,
+    
+    # ── [국방 & 안보 & 해양] ──
+    "국방": 12, "군사": 15, "군수": 15, "전장": 15, "방산": 12, "신속시범": 15,
+    "MDA": 20, "선박": 12, "통합관제": 10, "해경": 10, "해양경찰": 10,
+    
+    # ── [특수 도메인 & 실적 연관 영역] ──
+    "산림": 12, "국립공원": 15, "기후변화": 10, "벼": 15, "관개": 15, "재배지": 15,
+    "농식품": 10, "국유지": 15, "드론": 10, "큐레이팅봇": 15, "문화관람": 10,
+    "K-water": 15, "수자원공사": 10,
+    
+    # ── [해외 / ODA / 사업유형] ──
+    "ODA": 15, "KSP": 15, "UNOPS": 20, "NSPA": 20, "R&D": 8, "시스템구축": 8, "예비설계": 10
+}
 
-def fetch_g2b_servc_bids(days_back=7):
-    """12번 API: 나라장터 용역 입찰 공고 수집 (타임아웃 및 3회 재시도 적용)"""
-    now = datetime.datetime.now()
-    start_date = (now - datetime.timedelta(days=days_back)).strftime("%Y%m%d0000")
-    end_date = now.strftime("%Y%m%d2359")
+# 2. 조합 키워드 가중치 (복합 조건 보널스 점수)
+COMBO_PATTERNS = [
+    (r"위성.*AI|AI.*위성", 25),            # 위성 + AI
+    (r"항공.*판독|정사영상.*제작", 20),      # 항공/정사영상 관련
+    (r"산림.*위성|산림.*AI", 20),           # 산림 응용
+    (r"군사.*지도|군수.*지도", 25),          # 군사/군수 지도
+    (r"변화탐지|변화이력", 20),             # 변화 탐지
+    (r"학습데이터|데이터셋", 15),           # AI 데이터셋
+    (r"해양.*MDA|선박.*분류", 25),          # 해양 안보
+    (r"국립공원.*모니터링", 20),           # 환경/국립공원
+    (r"큐레이팅봇|문화정보", 20),           # 특수 지능형 로봇/서비스
+]
 
-    params = {
-        'serviceKey': SERVICE_KEY,
-        'inqryDiv': '1',
-        'inqryBgnDt': start_date,
-        'inqryEndDt': end_date,
-        'numOfRows': '100',
-        'pageNo': '1',
-        'type': 'json'
-    }
+# 3. 제외/감점 키워드 (다비오 비관련 분야)
+EXCLUDE_KEYWORDS = ["토목공사", "가구구매", "배관공사", "청소용역", "급식", "경비용역", "시설관리"]
 
-    max_retries = 3
-    for attempt in range(1, max_retries + 1):
-        try:
-            print(f"[INFO] G2B API 호출 시도 ({attempt}/{max_retries})...")
-            response = requests.get(G2B_SERVC_SEARCH_URL, params=params, timeout=30)
-            response.raise_for_status()
-            data = response.json()
+def calculate_bid_score(title: str, description: str = "") -> float:
+    """
+    공고 제목 및 상세 설명을 바탕으로 다비오 연관성 스코어를 계산합니다.
+    """
+    text = f"{title} {description}".upper()
+    score = 0.0
+    
+    # 1. 제외 키워드 체크
+    for ex in EXCLUDE_KEYWORDS:
+        if ex.upper() in text:
+            return 0.0  # 감점 또는 아예 제외
+            
+    # 2. 단일 키워드 점수 합산
+    for kw, weight in KEYWORD_WEIGHTS.items():
+        if kw.upper() in text:
+            score += weight
+            
+    # 3. 조합 키워드 보너스 점수
+    for pattern, bonus in COMBO_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            score += bonus
+            
+    return score
 
-            items = data.get('response', {}).get('body', {}).get('items', [])
-            if isinstance(items, dict):
-                items = items.get('item', [])
-
-            filtered_bids = []
-            for item in items:
-                bid_title = item.get('bidNtceNm', '')
-                score, grade = calculate_score_and_grade(bid_title)
-                
-                if grade is not None:
-                    bid_no = item.get('bidNtceNo', '')
-                    rfp_url, rfp_name = fetch_rfp_file(bid_no)
-                    
-                    bid_info = {
-                        'bid_no': bid_no,
-                        'bid_name': bid_title,
-                        'order_agency': item.get('ntceInsttNm', '미지정'),
-                        'bid_date': item.get('bidNtceDt', ''),
-                        'bid_url': item.get('bidNtceDtlUrl', ''),
-                        'rfp_file_url': rfp_url,
-                        'rfp_file_name': rfp_name,
-                        'score': score,
-                        'grade': grade,
-                        'source': 'G2B'
-                    }
-                    filtered_bids.append(bid_info)
-
-            return filtered_bids
-
-        except Exception as e:
-            print(f"[WARN] 시도 {attempt} 실패: {e}")
-            if attempt < max_retries:
-                time.sleep(5)
-            else:
-                print("[ERROR] G2B API 최대 재시도 횟수 초과.")
-                return []
-
-def fetch_d2b_bids():
-    """국방전자조달(D2B) 공고 수집 (기존 로직 유지)"""
-    # 기존 프로젝트의 D2B 수집 코드가 있을 경우 여기에 유지됩니다.
-    return []
-
-def save_bids_to_db(bids):
-    """신규 공고 DB 저장"""
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    new_count = 0
-
-    for bid in bids:
-        cursor.execute("SELECT bid_no FROM bids WHERE bid_no = ?", (bid['bid_no'],))
-        if not cursor.fetchone():
-            cursor.execute('''
-                INSERT INTO bids (bid_no, bid_name, order_agency, bid_date, bid_url, rfp_file_url, rfp_file_name, score, grade, source)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                bid['bid_no'], 
-                bid['bid_name'], 
-                bid['order_agency'], 
-                bid['bid_date'], 
-                bid['bid_url'],
-                bid.get('rfp_file_url', ''),
-                bid.get('rfp_file_name', ''),
-                bid.get('score', 0),
-                bid.get('grade', '중'),
-                bid.get('source', 'G2B')
-            ))
-            new_count += 1
-
-    conn.commit()
-    conn.close()
-    return new_count
-
+# 테스트 예시
 if __name__ == "__main__":
-    init_db()
-    print("나라장터 용역 입찰 공고 수집 및 스코어링 시작...")
-    bids = fetch_g2b_servc_bids(days_back=7)
-    new_added = save_bids_to_db(bids)
-    print(f"수집 완료: 총 {len(bids)}건 유효 공고 수집 (신규 {new_added}건 DB 저장됨).")
+    sample_titles = [
+        "도미니카(공) ICT기반 국립공원 기후변화 모니터링 역량 고도화 사업 PC1(시스템구축) 용역",
+        "해양경찰청 MDA 5차 사업",
+        "2026년 지능형 멀티 문화정보 큐레이팅봇 구축",
+        "파주시 정사영상 제작 사업",
+        "단순 건물 시설 청소 용역 공고"
+    ]
+    
+    for t in sample_titles:
+        print(f"점수: {calculate_bid_score(t):5.1f} | 공고명: {t}")
