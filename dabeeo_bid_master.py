@@ -5,7 +5,7 @@ import requests
 from datetime import datetime, timedelta
 
 # =============================================================
-# 1. 스코어링 규칙 및 키워드 정의 (Dabeeo 맞춤형)
+# 1. 다비오(Dabeeo) 맞춤형 키워드 & 가중치 규칙
 # =============================================================
 
 KEYWORD_WEIGHTS = {
@@ -52,22 +52,19 @@ COMBO_PATTERNS = [
 
 # 패널티 및 무관 공고 필터링 (-30점)
 NEGATIVE_KEYWORDS = [
-    "큐레이팅봇", "QR.here", "행사운영", "문화관람", "급식", "청소", "경비"
+    "큐레이팅봇", "QR.here", "행사운영", "문화관람", "급식", "청소", "경비", "서버", "하드웨어"
 ]
-
 
 def calculate_score(title: str) -> tuple[int, list]:
     """공고명 기반 점수 및 매칭 사유 계산"""
     score = 0
     reasons = []
 
-    # A. 감점 키워드
     for neg in NEGATIVE_KEYWORDS:
         if neg in title:
             score -= 30
-            reasons.append(f"제외키워드({neg})")
+            reasons.append(f"제외({neg})")
 
-    # B. 영역별 키워드
     for category, data in KEYWORD_WEIGHTS.items():
         weight = data["score"]
         for kw in data["keywords"]:
@@ -75,7 +72,6 @@ def calculate_score(title: str) -> tuple[int, list]:
                 score += weight
                 reasons.append(f"{kw}(+{weight})")
 
-    # C. Combo 시너지
     for p1, p2 in COMBO_PATTERNS:
         if re.search(p1, title, re.IGNORECASE) and re.search(p2, title, re.IGNORECASE):
             score += 15
@@ -88,11 +84,11 @@ def calculate_score(title: str) -> tuple[int, list]:
 # 2. SQLite DB 관리 함수 (g2b_bot_email.py 호환)
 # =============================================================
 
-DB_PATH = "bids.db"
+DB_NAME = "g2b_bids.db"  # g2b_bot_email.py에서 사용하는 DB파일명과 일치
 
 def init_db():
     """DB 테이블 생성 및 초기화"""
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bids (
@@ -106,43 +102,40 @@ def init_db():
     conn.commit()
     conn.close()
 
-def is_bid_exists(bid_no: str) -> bool:
-    """이미 처리된 공고인지 확인"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT 1 FROM bids WHERE bid_no = ?", (bid_no,))
-    result = cursor.fetchone()
-    conn.close()
-    return result is not None
-
 def save_bids_to_db(bids: list):
-    """신규 공고 DB 저장"""
-    conn = sqlite3.connect(DB_PATH)
+    """g2b_bot_email.py에서 넘겨받는 new_bids 저장"""
+    conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for bid in bids:
         cursor.execute("""
             INSERT OR IGNORE INTO bids (bid_no, title, url, score, created_at)
             VALUES (?, ?, ?, ?, ?)
-        """, (bid.get('bidNtceNo'), bid.get('bidNtceNm'), bid.get('bidNtceDtlUrl'), bid.get('score', 0), now))
+        """, (
+            bid.get('bid_no'),
+            bid.get('bid_name'),
+            bid.get('bid_url', ''),
+            bid.get('score', 0),
+            now
+        ))
     conn.commit()
     conn.close()
 
 
 # =============================================================
-# 3. 나라장터 API 수집 및 필터링 메인 함수
+# 3. 나라장터(G2B) API 수집 및 필터링 메인 함수
 # =============================================================
 
 def fetch_g2b_servc_bids() -> list:
-    """g2b_bot_email.py에서 호출하는 공고 수집 메인 함수"""
+    """g2b_bot_email.py와 100% 규격이 맞추어진 G2B 수집 함수"""
     init_db()
     
     api_key = os.getenv("G2B_API_KEY")
     if not api_key:
-        print("[경고] G2B_API_KEY 환경변수가 설정되지 않았습니다.")
+        print("[WARN] G2B_API_KEY 환경변수가 설정되지 않았습니다.")
         return []
 
-    # 조회 기간: 최근 3일
+    # 최근 3일간 공고 조회
     now = datetime.now()
     inqrBeginDt = (now - timedelta(days=3)).strftime("%Y%m%d0000")
     inqrEndDt = now.strftime("%Y%m%d2359")
@@ -163,30 +156,42 @@ def fetch_g2b_servc_bids() -> list:
         data = response.json()
         items = data.get('response', {}).get('body', {}).get('items', [])
     except Exception as e:
-        print(f"[API 오류] 나라장터 API 호출 실패: {e}")
+        print(f"[API ERROR] 나라장터 API 호출 실패: {e}")
         return []
 
     target_bids = []
     
-    print(f"\n--- 총 {len(items)}건의 공고 수집됨 (스코어링 시작) ---")
+    print(f"\n--- 나라장터 수집 공고 {len(items)}건 스코어링 시작 ---")
     for item in items:
-        bid_no = item.get('bidNtceNo')
+        # 공고 고유 데이터 추출
+        bid_no = item.get('bidNtceNo', '')
         title = item.get('bidNtceNm', '')
-        
-        # 1) 점수 산출
+        order_agency = item.get('ntceInsttNm') or item.get('dminsttNm') or '미지정 기관'
+        bid_date = item.get('bidClseDt', '진행중')
+        bid_url = item.get('bidNtceDtlUrl') or f"https://www.g2b.go.kr:8081/ep/invitation/ui/bidGonggoDtl.do?bidNo={bid_no}"
+        region = item.get('prtcLmtRgnNm', '전국')
+
+        # 스코어링 계산
         score, reasons = calculate_score(title)
-        item['score'] = score
-        item['reasons'] = reasons
+        
+        print(f"[검토] 점수: {score:2d} | 공고명: {title} | 이유: {reasons}")
 
-        # 디버깅용 실시간 출력
-        print(f"[검토] 점수: {score:2d} | 이유: {reasons} | 공고명: {title}")
-
-        # 2) DB 중복 체크 및 기준점수 이상 필터링 (5점 이상)
+        # 최소 5점 이상인 공고만 필터링하여 g2b_bot_email.py의 딕셔너리 키 형태로 변환
         if score >= 5:
-            if not is_bid_exists(bid_no):
-                target_bids.append(item)
-            else:
-                print(f" -> [중복 제외] 이미 저장된 공고입니다: {bid_no}")
+            target_bids.append({
+                'bid_no': bid_no,
+                'bid_name': title,
+                'order_agency': order_agency,
+                'bid_date': bid_date,
+                'bid_url': bid_url,
+                'region': region,
+                'score': score,
+                'source': 'G2B'
+            })
 
-    print(f"--- 최종 추천 공고: {len(target_bids)}건 ---\n")
+    print(f"--- 필터링 통과 공고: {len(target_bids)}건 ---\n")
     return target_bids
+
+def fetch_d2b_bids() -> list:
+    """국방전자조달(D2B) 수집용 (미구현 시 빈 리스트 반환하여 ImportError 방지)"""
+    return []
