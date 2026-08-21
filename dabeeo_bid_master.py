@@ -126,9 +126,8 @@ def save_bids_to_db(bids: list):
 # =============================================================
 # 3. 공고 수집 메인 함수
 # =============================================================
-
 def fetch_g2b_servc_bids() -> list:
-    """나라장터(G2B) 용역 공고 수집 및 필터링"""
+    """수집 범위 확대 및 통과 점수 완화 버전"""
     init_db()
     
     api_key = (
@@ -143,15 +142,15 @@ def fetch_g2b_servc_bids() -> list:
 
     api_key = urllib.parse.unquote(api_key)
 
-    # 최근 3일간 조회
+    # 1. 수집 일수를 기존 3일에서 14일로 대폭 확대
     now = datetime.now()
-    inqrBeginDt = (now - timedelta(days=3)).strftime("%Y%m%d0000")
+    inqrBeginDt = (now - timedelta(days=14)).strftime("%Y%m%d0000")
     inqrEndDt = now.strftime("%Y%m%d2359")
 
     url = "http://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPstServcListInfoThng02"
     params = {
         'serviceKey': api_key,
-        'numOfRows': '100',
+        'numOfRows': '500',  # 2. 한 번에 최대 500건 조회
         'pageNo': '1',
         'inqrDiv': '1',
         'inqrBeginDt': inqrBeginDt,
@@ -160,7 +159,7 @@ def fetch_g2b_servc_bids() -> list:
     }
 
     try:
-        response = requests.get(url, params=params, timeout=15)
+        response = requests.get(url, params=params, timeout=20)
         data = response.json()
         items = data.get('response', {}).get('body', {}).get('items', [])
     except Exception as e:
@@ -169,7 +168,7 @@ def fetch_g2b_servc_bids() -> list:
 
     target_bids = []
     
-    print(f"\n--- 수집 공고 {len(items)}건 검토 시작 ---")
+    print(f"\n--- 최근 14일간 나라장터 공고 {len(items)}건 검토 시작 ---")
     for item in items:
         bid_no = item.get('bidNtceNo', '')
         title = item.get('bidNtceNm', '')
@@ -179,10 +178,10 @@ def fetch_g2b_servc_bids() -> list:
         region = item.get('prtcLmtRgnNm', '전국')
 
         score, reasons = calculate_score(title)
-        print(f"[검토] 점수: {score:2d} | 공고명: {title} | 이유: {reasons}")
 
-        # 점수 기준 설정 (5점 이상 시 이메일 리포트 포함)
-        if score >= 5:
+        # 3. 임계값을 1점으로 완화 (단 1개라도 연관 키워드가 있으면 검토 리스트에 노출)
+        if score >= 1:
+            print(f"[통과] 점수: {score:2d} | 이유: {reasons} | 공고명: {title}")
             target_bids.append({
                 'bid_no': bid_no,
                 'bid_name': title,
@@ -193,6 +192,9 @@ def fetch_g2b_servc_bids() -> list:
                 'score': score,
                 'source': 'G2B'
             })
+
+    # 점수가 높은 순서대로 내림차순 정렬
+    target_bids.sort(key=lambda x: x['score'], reverse=True)
 
     print(f"--- 필터링 통과 공고: {len(target_bids)}건 ---\n")
     return target_bids
