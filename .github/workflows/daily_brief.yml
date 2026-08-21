@@ -11,10 +11,10 @@ jobs:
 
     steps:
     - name: Check out repository
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
@@ -25,6 +25,7 @@ jobs:
 
     - name: Run Bid Bot & Send Email
       env:
+        G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
         SMTP_SERVER: "smtp.gmail.com"
         SMTP_PORT: 587
         SMTP_USER: ${{ secrets.SMTP_USER }}
