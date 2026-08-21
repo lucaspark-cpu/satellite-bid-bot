@@ -1,10 +1,9 @@
 import os
-import sqlite3
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-from dabeeo_bid_master import fetch_g2b_servc_bids, save_bids_to_db, init_db, fetch_d2b_bids
+from dabeeo_bid_master import fetch_g2b_servc_bids, fetch_d2b_bids
 
 SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
@@ -54,7 +53,7 @@ def build_email_html(bids: list) -> str:
             </div>
 
             <h3 style="font-size: 16px; font-weight: bold; color: #d69e2e; border-bottom: 2px solid #ed8936; padding-bottom: 6px; margin-bottom: 16px;">
-                검토 권장 공고 리스트 ({total_count}건)
+                유효 진행 공고 리스트 ({total_count}건)
             </h3>
 
             <div>
@@ -100,15 +99,15 @@ def build_email_html(bids: list) -> str:
     """
     return html
 
-def send_email_notification(new_bids: list):
+def send_email_notification(bids: list):
     if not SMTP_USER or not SMTP_PASSWORD or not RECEIVER_EMAIL:
         print("[ERROR] 이메일 설정(SMTP_USER, SMTP_PASSWORD, RECEIVER_EMAIL)을 확인해주세요.")
         return
 
-    html_content = build_email_html(new_bids)
+    html_content = build_email_html(bids)
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"🚀 [다비오 입찰 알림] 신규 맞춤 공고 {len(new_bids)}건이 수집되었습니다."
+    msg["Subject"] = f"🚀 [다비오 입찰 알림] 진행 중인 유효 공고 {len(bids)}건이 수집되었습니다."
     msg["From"] = SMTP_USER
     msg["To"] = RECEIVER_EMAIL
     msg.attach(MIMEText(html_content, "html"))
@@ -120,13 +119,12 @@ def send_email_notification(new_bids: list):
         receivers = [e.strip() for e in RECEIVER_EMAIL.split(",")]
         server.sendmail(SMTP_USER, receivers, msg.as_string())
         server.quit()
-        print(f"[SUCCESS] 이메일 발송 완료 ({len(receivers)}명)")
+        print(f"[SUCCESS] 이메일 발송 완료 ({len(receivers)}명 대상)")
     except Exception as e:
         print(f"[ERROR] 이메일 발송 실패: {e}")
 
 def notify_new_bids():
-    init_db()
-    
+    # DB 중복 체크 제거: G2B + D2B 유효 공고 전체 수집 후 발송
     all_bids = fetch_g2b_servc_bids()
     if fetch_d2b_bids:
         try:
@@ -135,21 +133,11 @@ def notify_new_bids():
         except Exception as e:
             print(f"[WARN] D2B 수집 에러: {e}")
 
-    conn = sqlite3.connect("g2b_bids.db")
-    cursor = conn.cursor()
-    
-    new_bids = []
-    for bid in all_bids:
-        cursor.execute("SELECT bid_no FROM bids WHERE bid_no = ?", (bid['bid_no'],))
-        if not cursor.fetchone():
-            new_bids.append(bid)
-
-    if not new_bids:
-        print("신규 공고가 없어 메일을 보낼 건이 없습니다.")
+    if not all_bids:
+        print("조건에 맞는 마감 전 유효 공고가 없어 메일을 보낼 건이 없습니다.")
         return
 
-    send_email_notification(new_bids)
-    save_bids_to_db(new_bids)
+    send_email_notification(all_bids)
 
 if __name__ == "__main__":
     notify_new_bids()
