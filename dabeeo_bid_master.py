@@ -127,7 +127,7 @@ def save_bids_to_db(bids: list):
 # 3. 공고 수집 메인 함수
 # =============================================================
 def fetch_g2b_servc_bids() -> list:
-    """수집 범위 확대 및 통과 점수 완화 버전"""
+    """최근 2개월(60일) 공고 게시일 기준 수집 및 마감일 유효 공고 최신순 정렬"""
     init_db()
     
     api_key = (
@@ -137,66 +137,94 @@ def fetch_g2b_servc_bids() -> list:
     )
     
     if not api_key:
-        print("[WARN] G2B API 키가 설정되지 않았습니다.")
+        print("[WARN] G2B API 키가 환경변수에 존재하지 않습니다.")
         return []
 
-    api_key = urllib.parse.unquote(api_key)
+    api_key_clean = urllib.parse.unquote(api_key)
 
-    # 1. 수집 일수를 기존 3일에서 14일로 대폭 확대
+    # 1. 수집 기간: 공고 개시일 기준 최근 60일(2개월) 전부터 오늘까지
     now = datetime.now()
-    inqrBeginDt = (now - timedelta(days=14)).strftime("%Y%m%d0000")
+    inqrBeginDt = (now - timedelta(days=60)).strftime("%Y%m%d0000")
     inqrEndDt = now.strftime("%Y%m%d2359")
 
     url = "http://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPstServcListInfoThng02"
+
     params = {
-        'serviceKey': api_key,
-        'numOfRows': '500',  # 2. 한 번에 최대 500건 조회
+        'serviceKey': api_key_clean,
+        'numOfRows': '999',     # 최근 2개월 데이터를 충분히 수집하기 위해 조회 건수 상향
         'pageNo': '1',
-        'inqrDiv': '1',
+        'inqrDiv': '1',         # 1: 공고 개시일 기준 조회
         'inqrBeginDt': inqrBeginDt,
         'inqrEndDt': inqrEndDt,
         'type': 'json'
     }
 
+    items = []
     try:
-        response = requests.get(url, params=params, timeout=20)
-        data = response.json()
-        items = data.get('response', {}).get('body', {}).get('items', [])
+        response = requests.get(url, params=params, timeout=25)
+        
+        if response.status_code != 200:
+            print(f"[API HTTP ERROR] 응답 코드: {response.status_code}")
+            return []
+
+        try:
+            data = response.json()
+            items = data.get('response', {}).get('body', {}).get('items', [])
+            
+            if isinstance(items, dict):
+                items = [items]
+            elif not items:
+                print(f"[API WARN] 최근 2개월간 수집된 데이터가 0건입니다.")
+                print(f"[API DEBUG] Raw Response: {response.text[:300]}")
+                return []
+                
+        except Exception as json_err:
+            print(f"[API JSON ERROR] JSON 파싱 실패 (API 키 인코딩/인증 확인 필요): {json_err}")
+            print(f"[API DEBUG] Raw Response: {response.text[:300]}")
+            return []
+
     except Exception as e:
-        print(f"[API ERROR] 나라장터 API 호출 실패: {e}")
+        print(f"[API Connection Error] 네트워크 호출 실패: {e}")
         return []
 
     target_bids = []
+    current_time_str = now.strftime("%Y-%m-%d %H:%M")
     
-    print(f"\n--- 최근 14일간 나라장터 공고 {len(items)}건 검토 시작 ---")
+    print(f"\n--- 최근 2개월간 나라장터 원천 공고 {len(items)}건 검토 시작 ---")
     for item in items:
         bid_no = item.get('bidNtceNo', '')
         title = item.get('bidNtceNm', '')
         order_agency = item.get('ntceInsttNm') or item.get('dminsttNm') or '미지정 기관'
-        bid_date = item.get('bidClseDt', '진행중')
+        bid_date = item.get('bidClseDt', '')  # YYYY-MM-DD HH:MM:SS 또는 문자열
+        reg_dt = item.get('bidNtceDt', '')    # 공고 게시/등록일시
         bid_url = item.get('bidNtceDtlUrl') or f"https://www.g2b.go.kr:8081/ep/invitation/ui/bidGonggoDtl.do?bidNo={bid_no}"
         region = item.get('prtcLmtRgnNm', '전국')
 
+        # 2. 마감일 기준 유효 공고 체크 (마감일시가 존재하고, 현재 시간보다 이후인 경우만 통과)
+        if bid_date and bid_date < current_time_str:
+            continue
+
+        # 3. 키워드 점수 산출
         score, reasons = calculate_score(title)
 
-        # 3. 임계값을 1점으로 완화 (단 1개라도 연관 키워드가 있으면 검토 리스트에 노출)
         if score >= 1:
-            print(f"[통과] 점수: {score:2d} | 이유: {reasons} | 공고명: {title}")
+            print(f"[통과] 점수: {score:2d} | 마감일: {bid_date} | 이유: {reasons} | 공고명: {title}")
             target_bids.append({
                 'bid_no': bid_no,
                 'bid_name': title,
                 'order_agency': order_agency,
-                'bid_date': bid_date,
+                'bid_date': bid_date if bid_date else '진행중',
+                'reg_dt': reg_dt,
                 'bid_url': bid_url,
                 'region': region,
                 'score': score,
                 'source': 'G2B'
             })
 
-    # 점수가 높은 순서대로 내림차순 정렬
-    target_bids.sort(key=lambda x: x['score'], reverse=True)
+    # 4. 정렬 규칙: 1순위 점수(내림차순), 2순위 게시일시(최신순 내림차순)
+    target_bids.sort(key=lambda x: (x['score'], x['reg_dt']), reverse=True)
 
-    print(f"--- 필터링 통과 공고: {len(target_bids)}건 ---\n")
+    print(f"--- 유효 마감일 기준 최종 추출 공고: {len(target_bids)}건 ---\n")
     return target_bids
 
 def fetch_d2b_bids() -> list:
