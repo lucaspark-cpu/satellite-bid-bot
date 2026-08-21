@@ -9,7 +9,6 @@ from datetime import datetime, timedelta
 # =============================================================
 
 KEYWORD_WEIGHTS = {
-    # [Core] 데이터 출처 및 위성/항공 도메인 (+10점)
     "CORE": {
         "keywords": [
             "위성", "초소형위성", "항공사진", "정사영상", "드론", "SAR", "EO",
@@ -17,7 +16,6 @@ KEYWORD_WEIGHTS = {
         ],
         "score": 10
     },
-    # [Tech] 핵심 AI 및 공간분석 기술 (+7점)
     "TECH": {
         "keywords": [
             "변화탐지", "객체식별", "지리공간", "공간정보", "디지털트윈", "디지털 트윈",
@@ -27,7 +25,6 @@ KEYWORD_WEIGHTS = {
         ],
         "score": 7
     },
-    # [Domain] 다비오 특화 적용 도메인 및 고객사 (+5점)
     "DOMAIN": {
         "keywords": [
             "MDA", "해경", "해양경찰", "국방", "군사지도", "군수지도", "전장", "유무인",
@@ -38,25 +35,17 @@ KEYWORD_WEIGHTS = {
     }
 }
 
-# 시너지 조합 키워드 (+15점)
 COMBO_PATTERNS = [
-    (r"위성", r"AI"),
-    (r"위성", r"변화탐지"),
-    (r"항공", r"변화탐지"),
-    (r"국방", r"AI"),
-    (r"해경", r"위성"),
-    (r"공간정보", r"플랫폼"),
-    (r"지적", r"ODA"),
-    (r"학습데이터", r"구축")
+    (r"위성", r"AI"), (r"위성", r"변화탐지"), (r"항공", r"변화탐지"),
+    (r"국방", r"AI"), (r"해경", r"위성"), (r"공간정보", r"플랫폼"),
+    (r"지적", r"ODA"), (r"학습데이터", r"구축")
 ]
 
-# 패널티 및 무관 공고 필터링 (-30점)
 NEGATIVE_KEYWORDS = [
     "큐레이팅봇", "QR.here", "행사운영", "문화관람", "급식", "청소", "경비", "서버", "하드웨어"
 ]
 
 def calculate_score(title: str) -> tuple[int, list]:
-    """공고명 기반 점수 및 매칭 사유 계산"""
     score = 0
     reasons = []
 
@@ -81,7 +70,7 @@ def calculate_score(title: str) -> tuple[int, list]:
 
 
 # =============================================================
-# 2. 호환성 유지용 더미 함수 (DB 호환성 유지)
+# 2. 호환성 유지용 더미 함수
 # =============================================================
 
 def init_db():
@@ -92,11 +81,11 @@ def save_bids_to_db(bids: list):
 
 
 # =============================================================
-# 3. 공고 수집 메인 함수
+# 3. 나라장터 공고 수집 메인 함수 (최근 15일 단 1회 조회)
 # =============================================================
 
 def fetch_g2b_servc_bids() -> list:
-    """최근 60일 공고 개시일 기준 수집 및 마감일 유효 공고 최신순 정렬"""
+    """최근 15일간 게시된 공고 1회 수집 + 마감전 유효 공고 최신순 정렬"""
     api_key = (
         os.getenv("G2B_API_KEY") or 
         os.getenv("SERVICE_KEY") or 
@@ -107,18 +96,19 @@ def fetch_g2b_servc_bids() -> list:
         print("[WARN] G2B API 키가 환경변수에 존재하지 않습니다.")
         return []
 
-    # API 키 정제 (줄바꿈 제거)
+    # API 키 정제 (개행 및 공백 제거)
     api_key_clean = urllib.parse.unquote(api_key).strip().replace('\r', '').replace('\n', '')
 
+    # 최근 15일 개시일 기준 범위 설정
     now = datetime.now()
-    inqrBeginDt = (now - timedelta(days=60)).strftime("%Y%m%d0000")
+    inqrBeginDt = (now - timedelta(days=15)).strftime("%Y%m%d0000")
     inqrEndDt = now.strftime("%Y%m%d2359")
 
-    url = "https://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPstServcListInfoThng02"
+    url = "http://apis.data.go.kr/1230000/BidPublicInfoService02/getBidPstServcListInfoThng02"
 
     params = {
         'serviceKey': api_key_clean,
-        'numOfRows': '200',
+        'numOfRows': '100',
         'pageNo': '1',
         'inqrDiv': '1',         # 1: 공고 개시일 기준
         'inqrBeginDt': inqrBeginDt,
@@ -128,7 +118,7 @@ def fetch_g2b_servc_bids() -> list:
 
     items = []
     try:
-        response = requests.get(url, params=params, timeout=30)
+        response = requests.get(url, params=params, timeout=15)
         if response.status_code != 200:
             print(f"[API HTTP ERROR] 응답 코드: {response.status_code}")
             return []
@@ -149,7 +139,7 @@ def fetch_g2b_servc_bids() -> list:
     target_bids = []
     current_time_str = now.strftime("%Y-%m-%d %H:%M")
     
-    print(f"\n--- 최근 2개월간 나라장터 원천 공고 {len(items)}건 검토 시작 ---")
+    print(f"\n--- 최근 15일간 나라장터 원천 공고 {len(items)}건 검토 시작 ---")
     for item in items:
         bid_no = item.get('bidNtceNo', '')
         title = item.get('bidNtceNm', '')
@@ -159,7 +149,7 @@ def fetch_g2b_servc_bids() -> list:
         bid_url = item.get('bidNtceDtlUrl') or f"https://www.g2b.go.kr:8081/ep/invitation/ui/bidGonggoDtl.do?bidNo={bid_no}"
         region = item.get('prtcLmtRgnNm', '전국')
 
-        # 마감일 지난 공고 자동 제외
+        # 마감일 지난 공고 자동 필터링
         if bid_date and bid_date < current_time_str:
             continue
 
@@ -182,7 +172,7 @@ def fetch_g2b_servc_bids() -> list:
     # 정렬: 1순위 점수(내림차순), 2순위 게시일시(최신순 내림차순)
     target_bids.sort(key=lambda x: (x['score'], x['reg_dt']), reverse=True)
 
-    print(f"--- 최종 유효 공고: {len(target_bids)}건 ---\n")
+    print(f"--- 최종 마감전 유효 공고: {len(target_bids)}건 ---\n")
     return target_bids
 
 def fetch_d2b_bids() -> list:
