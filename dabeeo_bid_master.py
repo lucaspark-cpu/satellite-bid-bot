@@ -3,6 +3,8 @@ import re
 import requests
 import urllib.parse
 from datetime import datetime, timedelta
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # =============================================================
 # 1. 다비오(Dabeeo) 맞춤형 키워드 & 가중치 규칙
@@ -81,11 +83,33 @@ def save_bids_to_db(bids: list):
 
 
 # =============================================================
-# 3. 나라장터 공고 수집 메인 함수 (최근 15일 단 1회 조회)
+# 3. 강건한 API 세션 생성 함수 (Retry & User-Agent)
+# =============================================================
+
+def get_robust_session():
+    """공공데이터포털 서버 불안정 완화를 위한 자동 재시도 세션"""
+    session = requests.Session()
+    retry_strategy = Retry(
+        total=5,                  # 최대 5회 재시도
+        backoff_factor=2,         # 2초, 4초, 8초... 지연 후 재시도
+        status_forcelist=[500, 502, 503, 504],
+        raise_on_status=False
+    )
+    adapter = HTTPAdapter(max_retries=retry_strategy)
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    })
+    return session
+
+
+# =============================================================
+# 4. 나라장터 공고 수집 메인 함수
 # =============================================================
 
 def fetch_g2b_servc_bids() -> list:
-    """최근 15일간 게시된 공고 1회 수집 + 마감전 유효 공고 최신순 정렬"""
+    """최근 15일 개시일 기준 수집 (강건한 Retry 세션 적용)"""
     api_key = (
         os.getenv("G2B_API_KEY") or 
         os.getenv("SERVICE_KEY") or 
@@ -96,10 +120,8 @@ def fetch_g2b_servc_bids() -> list:
         print("[WARN] G2B API 키가 환경변수에 존재하지 않습니다.")
         return []
 
-    # API 키 정제 (개행 및 공백 제거)
     api_key_clean = urllib.parse.unquote(api_key).strip().replace('\r', '').replace('\n', '')
 
-    # 최근 15일 개시일 기준 범위 설정
     now = datetime.now()
     inqrBeginDt = (now - timedelta(days=15)).strftime("%Y%m%d0000")
     inqrEndDt = now.strftime("%Y%m%d2359")
@@ -110,15 +132,19 @@ def fetch_g2b_servc_bids() -> list:
         'serviceKey': api_key_clean,
         'numOfRows': '100',
         'pageNo': '1',
-        'inqrDiv': '1',         # 1: 공고 개시일 기준
+        'inqrDiv': '1',
         'inqrBeginDt': inqrBeginDt,
         'inqrEndDt': inqrEndDt,
         'type': 'json'
     }
 
+    session = get_robust_session()
     items = []
+    
     try:
-        response = requests.get(url, params=params, timeout=15)
+        # 타임아웃을 60초로 여유 있게 설정
+        response = session.get(url, params=params, timeout=60)
+        
         if response.status_code != 200:
             print(f"[API HTTP ERROR] 응답 코드: {response.status_code}")
             return []
@@ -133,7 +159,7 @@ def fetch_g2b_servc_bids() -> list:
             return []
 
     except Exception as e:
-        print(f"[API Connection Error] 네트워크 호출 실패: {e}")
+        print(f"[API Connection Error] 네트워크 호출 최종 실패: {e}")
         return []
 
     target_bids = []
@@ -149,7 +175,6 @@ def fetch_g2b_servc_bids() -> list:
         bid_url = item.get('bidNtceDtlUrl') or f"https://www.g2b.go.kr:8081/ep/invitation/ui/bidGonggoDtl.do?bidNo={bid_no}"
         region = item.get('prtcLmtRgnNm', '전국')
 
-        # 마감일 지난 공고 자동 필터링
         if bid_date and bid_date < current_time_str:
             continue
 
@@ -169,7 +194,6 @@ def fetch_g2b_servc_bids() -> list:
                 'source': 'G2B'
             })
 
-    # 정렬: 1순위 점수(내림차순), 2순위 게시일시(최신순 내림차순)
     target_bids.sort(key=lambda x: (x['score'], x['reg_dt']), reverse=True)
 
     print(f"--- 최종 마감전 유효 공고: {len(target_bids)}건 ---\n")
