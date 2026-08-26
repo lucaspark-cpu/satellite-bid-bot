@@ -49,6 +49,7 @@ jobs:
       - name: Run Bid Bot & Send Email
         env:
           G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
+          D2B_API_KEY: ${{ secrets.D2B_API_KEY }}
           SMTP_SERVER: smtp.gmail.com
           SMTP_PORT: '587'
           SMTP_USER: ${{ secrets.SMTP_USER }}
