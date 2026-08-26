@@ -4,6 +4,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formataddr
 
+# dabeeo_bid_master 모듈에서 필요한 함수 및 변수 임포트
 from dabeeo_bid_master import (
     fetch_g2b_bids,
     save_bids_to_db,
@@ -15,24 +16,51 @@ from dabeeo_bid_master import (
     TIER_MID,
 )
 
+# 옵션: D2B 수집 함수가 존재할 경우에만 동적 임포트
 try:
     from dabeeo_bid_master import fetch_d2b_bids
 except ImportError:
     fetch_d2b_bids = None
 
+# 환경 변수 설정
 SMTP_SERVER = os.environ.get("SMTP_SERVER", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 RECEIVER_EMAIL = os.environ.get("RECEIVER_EMAIL", "")
 
-# 검색 키워드 표시용 (dabeeo_bid_master.KEYWORDS 시드와 동기화)
+# 검색 키워드 표시용
 SEARCH_KEYWORDS_STR = "위성영상, 초소형위성, 정사영상, 항공사진, 원격탐사, 변화탐지, 객체탐지, 공간정보, 지리정보, 학습데이터, 드론, 판독"
 
+
+def _friendly_summary(tier: str, matched: list, reasons: list) -> str:
+    """비개발자 친화적 요약: 점수/레이어 용어 대신 평문 설명"""
+    top_kw = " · ".join(matched[:4]) if matched else "관련 키워드"
+    has_cross = any("동시출현" in str(r) or "보너스" in str(r) for r in reasons)
+    has_agency = any("화이트리스트" in str(r) or "발주기관" in str(r) for r in reasons)
+    has_price = any("추정가격" in str(r) or "예산" in str(r) for r in reasons)
+
+    if tier == "상":
+        base = "Dabeeo가 수주한 사업과 같은 유형의 공고입니다"
+    else:
+        base = "Dabeeo 역량과 연관된 공고입니다"
+
+    extras = []
+    if has_cross:
+        extras.append("영상·AI 역량이 함께 등장해 연관성이 높습니다")
+    if has_agency:
+        extras.append("Dabeeo와 거래 이력이 있는 발주기관입니다")
+    if has_price:
+        extras.append("예산 규모가 참여 기준 이상입니다")
+    extras.append(f"매칭 키워드: {top_kw}")
+
+    return (base + " — " + " / ".join(extras)) if extras else base
+
+
 def build_email_html(bids):
-    """보내주신 이미지와 100% 동일한 HTML 메일 양식 생성"""
+    """HTML 메일 양식 생성"""
     total_count = len(bids)
-    
+
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -43,7 +71,7 @@ def build_email_html(bids):
         <div style="max-width: 900px; margin: 0 auto;">
             
             <!-- 헤더 영역 -->
-            <h2 style="font-size: 22px; font-weight: bold; color: #1a202c; margin-bottom: 12px; display: flex; align-items: center;">
+            <h2 style="font-size: 22px; font-weight: bold; color: #1a202c; margin-bottom: 12px;">
                 🚀 나라장터 및 국방전자조달 통합 인텔리전스
             </h2>
             <p style="font-size: 14px; color: #4a5568; margin-top: 0; margin-bottom: 8px;">
@@ -78,7 +106,7 @@ def build_email_html(bids):
             <div>
     """
 
-    # [NEW] '상 → 중' 등급 순으로 섹션을 나눠 렌더링한다.
+    # '상 → 중' 등급 순으로 정렬
     ordered = sorted(
         bids,
         key=lambda b: (0 if b.get('tier') == TIER_HIGH else 1, -int(b.get('score', 0) or 0)),
@@ -101,16 +129,13 @@ def build_email_html(bids):
             """
         accent = "#e53e3e" if tier == TIER_HIGH else "#ed8936"
 
-        # [FIX] G2B 공고번호도 연도(20xx)로 시작하므로 startswith('20')는 전건 오분류였다.
-        # 출처는 수집기가 넣어준 source 필드로만 판정한다.
         is_d2b = (
             'D2B' in str(bid.get('source', '')).upper()
             or '국방' in str(bid.get('order_agency', ''))
         )
         tag_bg = "#ed8936" if is_d2b else "#3182ce"
         tag_text = "D2B 경쟁입찰" if is_d2b else "G2B 일반용역"
-        
-        # RFP 링크가 있을 경우 추가
+
         rfp_html = ""
         if bid.get('rfp_file_url'):
             rfp_html = f"""
@@ -119,7 +144,6 @@ def build_email_html(bids):
             </div>
             """
 
-        button_html = ""
         if is_d2b:
             button_html = """
             <div style="margin-top: 14px;">
@@ -137,29 +161,6 @@ def build_email_html(bids):
                 </a>
             </div>
             """
-
-        # 비개발자 친화적 요약: 점수/레이어 용어 대신 평문 설명
-        def _friendly_summary(tier: str, matched: list, reasons: list) -> str:
-            top_kw = " · ".join(matched[:4]) if matched else "관련 키워드"
-            has_cross = any("동시출현" in r or "보너스" in r for r in reasons)
-            has_agency = any("화이트리스트" in r or "발주기관" in r for r in reasons)
-            has_price = any("추정가격" in r or "예산" in r for r in reasons)
-
-            if tier == "상":
-                base = "Dabeeo가 수주한 사업과 같은 유형의 공고입니다"
-            else:
-                base = "Dabeeo 역량과 연관된 공고입니다"
-
-            extras = []
-            if has_cross:
-                extras.append("영상·AI 역량이 함께 등장해 연관성이 높습니다")
-            if has_agency:
-                extras.append("Dabeeo와 거래 이력이 있는 발주기관입니다")
-            if has_price:
-                extras.append("예산 규모가 참여 기준 이상입니다")
-            extras.append(f"매칭 키워드: {top_kw}")
-
-            return (base + " — " + " / ".join(extras)) if extras else base
 
         matched = bid.get('matched') or []
         reasons = bid.get('reasons') or []
@@ -186,20 +187,20 @@ def build_email_html(bids):
         tier_bg = "#c6f6d5" if tier_label == "상" else "#fefcbf"
 
         why_html = f"""
-    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #cbd5e0;">
-        <div style="font-size: 12px; color: #2d3748; margin-bottom: 6px;">
-            <span style="background:{tier_bg};color:{tier_color};font-weight:bold;
-                padding:2px 8px;border-radius:4px;margin-right:6px;">
-                중요도 {escape(tier_label)}
-            </span>
-            <strong>이 공고가 뜬 이유</strong>
+        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #cbd5e0;">
+            <div style="font-size: 12px; color: #2d3748; margin-bottom: 6px;">
+                <span style="background:{tier_bg};color:{tier_color};font-weight:bold;
+                    padding:2px 8px;border-radius:4px;margin-right:6px;">
+                    중요도 {escape(tier_label)}
+                </span>
+                <strong>이 공고가 뜬 이유</strong>
+            </div>
+            <div style="margin-bottom:6px;">{chips}</div>
+            <div style="font-size: 11px; color: #4a5568; line-height:1.6;">
+                {escape(_friendly_summary(tier_label, matched, reasons))}
+            </div>
         </div>
-        <div style="margin-bottom:6px;">{chips}</div>
-        <div style="font-size: 11px; color: #4a5568; line-height:1.6;">
-            {escape(_friendly_summary(tier_label, matched, reasons))}
-        </div>
-    </div>
-"""
+        """
 
         html += f"""
         <div style="background-color: #f7fafc; border-left: 4px solid {accent}; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
@@ -231,6 +232,7 @@ def build_email_html(bids):
     """
     return html
 
+
 def send_email_notification(new_bids):
     if not SMTP_USER or not SMTP_PASSWORD or not RECEIVER_EMAIL:
         print("[ERROR] 이메일 환경변수가 지정되지 않았습니다.")
@@ -242,9 +244,7 @@ def send_email_notification(new_bids):
     receivers = RECEIVERS or [e.strip() for e in RECEIVER_EMAIL.split(",") if e.strip()]
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = (
-        f"[통합 입찰 리포트] 신규 {len(new_bids)}건 (상 {high}건)"
-    )
+    msg["Subject"] = f"[통합 입찰 리포트] 신규 {len(new_bids)}건 (상 {high}건)"
     msg["From"] = formataddr(("Dabeeo Bid Bot", SMTP_USER))
     msg["To"] = ", ".join(receivers)
     msg.attach(MIMEText(html_content, "html", "utf-8"))
@@ -258,14 +258,17 @@ def send_email_notification(new_bids):
     except Exception as e:
         print(f"[ERROR] 이메일 발송 실패: {e}")
 
+
 def notify_new_bids():
     init_db()
 
     # G2B + D2B 공고 통합 수집
-    all_bids = fetch_g2b_bids()
+    all_bids = fetch_g2b_bids() or []
     if fetch_d2b_bids:
         try:
-            all_bids.extend(fetch_d2b_bids())
+            d2b_res = fetch_d2b_bids()
+            if d2b_res:
+                all_bids.extend(d2b_res)
         except Exception as e:
             print(f"[WARN] D2B 수집 에러: {e}")
 
@@ -273,12 +276,11 @@ def notify_new_bids():
         print("오늘 통과된 공고가 없습니다.")
         return
 
-    # 신규 여부 표시 (DB에 없으면 is_new=True) — 이메일 배지용
+    # 신규 여부 표시
     new_bid_nos = {b["bid_no"] for b in filter_new_bids(all_bids)}
     for bid in all_bids:
         bid["is_new"] = bid["bid_no"] in new_bid_nos
 
-    # 통과 전체를 발송 (신규 여부 무관) — 신규만 DB 저장
     send_email_notification(all_bids)
     new_bids = [b for b in all_bids if b["is_new"]]
     if new_bids:
