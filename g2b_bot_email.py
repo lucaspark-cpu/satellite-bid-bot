@@ -36,14 +36,15 @@ SEARCH_KEYWORDS_STR = "위성영상, 초소형위성, 정사영상, 항공사진
 def _friendly_summary(tier: str, matched: list, reasons: list) -> str:
     """비개발자 친화적 요약: 점수/레이어 용어 대신 평문 설명"""
     top_kw = " · ".join(matched[:4]) if matched else "관련 키워드"
+    primary_kw = matched[0] if matched else "핵심"
     has_cross = any("동시출현" in str(r) or "보너스" in str(r) for r in reasons)
     has_agency = any("화이트리스트" in str(r) or "발주기관" in str(r) for r in reasons)
     has_price = any("추정가격" in str(r) or "예산" in str(r) for r in reasons)
 
     if tier == "상":
-        base = "Dabeeo가 수주한 사업과 같은 유형의 공고입니다"
+        base = f"Dabeeo가 수주한 {primary_kw} 사업과 같은 유형입니다"
     else:
-        base = "Dabeeo 역량과 연관된 공고입니다"
+        base = f"Dabeeo의 {primary_kw} 역량과 연관된 공고입니다"
 
     extras = []
     if has_cross:
