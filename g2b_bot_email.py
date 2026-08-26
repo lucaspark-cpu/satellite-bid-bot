@@ -138,7 +138,29 @@ def build_email_html(bids):
             </div>
             """
 
-        # [NEW] 왜 이 공고가 떴는지 = 매칭 키워드 + 판정 근거를 그대로 노출한다.
+        # 비개발자 친화적 요약: 점수/레이어 용어 대신 평문 설명
+        def _friendly_summary(tier: str, matched: list, reasons: list) -> str:
+            top_kw = " · ".join(matched[:4]) if matched else "관련 키워드"
+            has_cross = any("동시출현" in r or "보너스" in r for r in reasons)
+            has_agency = any("화이트리스트" in r or "발주기관" in r for r in reasons)
+            has_price = any("추정가격" in r or "예산" in r for r in reasons)
+
+            if tier == "상":
+                base = "Dabeeo가 수주한 사업과 같은 유형의 공고입니다"
+            else:
+                base = "Dabeeo 역량과 연관된 공고입니다"
+
+            extras = []
+            if has_cross:
+                extras.append("영상·AI 역량이 함께 등장해 연관성이 높습니다")
+            if has_agency:
+                extras.append("Dabeeo와 거래 이력이 있는 발주기관입니다")
+            if has_price:
+                extras.append("예산 규모가 참여 기준 이상입니다")
+            extras.append(f"매칭 키워드: {top_kw}")
+
+            return (base + " — " + " / ".join(extras)) if extras else base
+
         matched = bid.get('matched') or []
         reasons = bid.get('reasons') or []
         chips = "".join(
@@ -147,7 +169,6 @@ def build_email_html(bids):
             f'padding:1px 7px;margin:0 4px 4px 0;">{escape(k)}</span>'
             for k in matched[:12]
         )
-        # [NEW] 참가자격 게이트: 카탈로그상 보유 근거가 없는 자격 요구 → 사람 검토
         elig = bid.get('eligibility') or []
         elig_html = ""
         if elig:
@@ -160,17 +181,25 @@ def build_email_html(bids):
                 '</div>'
             )
 
+        tier_label = bid.get('tier', '중')
+        tier_color = "#276749" if tier_label == "상" else "#744210"
+        tier_bg = "#c6f6d5" if tier_label == "상" else "#fefcbf"
+
         why_html = f"""
-            <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #cbd5e0;">
-                <div style="font-size: 12px; color: #2d3748; margin-bottom: 4px;">
-                    <strong>왜 떴나 (점수 {int(bid.get('score', 0))}점 · {escape(bid.get('tier', '중'))})</strong>
-                </div>
-                <div>{chips}</div>
-                <div style="font-size: 11px; color: #718096; margin-top: 4px;">
-                    {escape(' / '.join(reasons))}
-                </div>
-            </div>
-        """
+    <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #cbd5e0;">
+        <div style="font-size: 12px; color: #2d3748; margin-bottom: 6px;">
+            <span style="background:{tier_bg};color:{tier_color};font-weight:bold;
+                padding:2px 8px;border-radius:4px;margin-right:6px;">
+                중요도 {escape(tier_label)}
+            </span>
+            <strong>이 공고가 뜬 이유</strong>
+        </div>
+        <div style="margin-bottom:6px;">{chips}</div>
+        <div style="font-size: 11px; color: #4a5568; line-height:1.6;">
+            {escape(_friendly_summary(tier_label, matched, reasons))}
+        </div>
+    </div>
+"""
 
         html += f"""
         <div style="background-color: #f7fafc; border-left: 4px solid {accent}; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
