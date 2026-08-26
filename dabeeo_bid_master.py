@@ -1225,8 +1225,18 @@ def fetch_d2b_bids(days: int = 3, min_score: int = SCORE_MID_CUT) -> List[Dict[s
                 or "진행중"
             )
 
+            # D2B 사이트 검색창에 붙여넣을 '공고번호' 후보 — 어느 쪽이 실제로 검색되는지
+            # 아직 확인 전이라 g2bPblancNo(-차수)를 1순위, dcsNo(판단번호)를 2순위로 둔다.
+            g2b_no = _d2b_text(it, "g2bPblancNo")
+            g2b_odr = _d2b_text(it, "g2bPblancOdr")
+            dcs_no = _d2b_text(it, "dcsNo")
+            search_no = (
+                (f"{g2b_no}-{g2b_odr}" if g2b_odr else g2b_no) if g2b_no
+                else (dcs_no or uid)
+            )
+
             results.append({
-                "bid_no": uid,
+                "bid_no": search_no,
                 "bid_name": title,
                 "order_agency": agency,
                 "bid_date": deadline,
@@ -1236,6 +1246,8 @@ def fetch_d2b_bids(days: int = 3, min_score: int = SCORE_MID_CUT) -> List[Dict[s
                 "reasons": sr.reasons,
                 "eligibility": sr.eligibility,
                 "source": "D2B",
+                "d2b_dcs_no": dcs_no,        # 검증용: 판단번호(구매요청번호)
+                "d2b_internal_no": uid,       # 검증용: D2B 내부 관리번호(기존값)
             })
 
         total = _to_int(_d2b_text(body, "totalCount"))
