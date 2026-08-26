@@ -23,6 +23,7 @@ import re
 import sqlite3
 import unicodedata
 import urllib.parse
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
@@ -77,9 +78,18 @@ G2B_BASE = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
 G2B_SERVC_OP = "getBidPblancListInfoServcPPSSrch"   # 용역
 G2B_THNG_OP = "getBidPblancListInfoThngPPSSrch"     # 물품(옵션, 기본 미사용)
 
+# 방위사업청_군수품조달정보 입찰공고_GW (국방전자조달/D2B)
+D2B_BASE = "https://apis.data.go.kr/1690000/BidPblancInfoService"
+D2B_DMSTC_LIST_OP = "getDmstcCmpetBidPblancList"    # 국내 경쟁입찰공고 목록
+
 HTTP_TIMEOUT = (5, 20)      # (connect, read)
 MAX_PAGES = 10
 NUM_OF_ROWS = 100
+
+# D2B는 개발계정 일일 트래픽이 100건으로 낮아, 키워드별 반복 질의(G2B 방식) 대신
+# 공고일자 구간으로 1~수 회만 조회하고 calculate_score()로 클라이언트단 필터링한다.
+D2B_MAX_PAGES = 5
+D2B_NUM_OF_ROWS = 100
 
 TIER_HIGH = "상"
 TIER_MID = "중"
@@ -1112,6 +1122,129 @@ def fetch_g2b_bids(
 # 기존 호출부(g2b_bot_email.py) 하위호환 별칭
 def fetch_g2b_servc_bids() -> List[Dict[str, Any]]:
     return fetch_g2b_bids()
+
+
+# =============================================================================
+# 9. D2B(국방전자조달) 수집 — 방위사업청_군수품조달정보 입찰공고_GW
+# =============================================================================
+# 응답이 표준 XML(<response><header>.../<body>...)이라 XML로 파싱한다.
+# g2b_bot_email.py 는 이 함수를 `try: from dabeeo_bid_master import fetch_d2b_bids`
+# 로 옵셔널 임포트하므로, 존재만 하면 자동으로 파이프라인에 합류한다.
+
+def _d2b_api_key() -> str:
+    key = os.environ.get("D2B_API_KEY") or ""
+    return urllib.parse.unquote(key)
+
+
+def _d2b_date_window(days: int = 3) -> Tuple[str, str]:
+    """D2B는 시간 없이 YYYYMMDD 8자리 날짜만 받는다 (G2B의 분단위 포맷과 다름)."""
+    now = datetime.now(KST)
+    bgn = (now - timedelta(days=days)).strftime("%Y%m%d")
+    end = now.strftime("%Y%m%d")
+    return bgn, end
+
+
+def _d2b_text(el: Optional["ET.Element"], tag: str) -> str:
+    if el is None:
+        return ""
+    child = el.find(tag)
+    return (child.text or "").strip() if child is not None and child.text else ""
+
+
+def fetch_d2b_bids(days: int = 3, min_score: int = SCORE_MID_CUT) -> List[Dict[str, Any]]:
+    """국내 경쟁입찰공고 목록(getDmstcCmpetBidPblancList)을 공고일자 구간으로 수집.
+
+    D2B는 상세페이지 직접 링크를 제공하지 않으므로(README FAQ 참고) bid_url은
+    비워두고, region 필드도 API가 제공하지 않아 채우지 않는다 — 이메일 템플릿의
+    기본값('국방전용/전국')이 자동으로 적용된다.
+    """
+    key = _d2b_api_key()
+    if not key:
+        print("[WARN] D2B_API_KEY 환경변수가 없습니다.")
+        return []
+
+    bgn, end = _d2b_date_window(days)
+    url = f"{D2B_BASE}/{D2B_DMSTC_LIST_OP}"
+    sess = _session()
+
+    seen: set = set()
+    results: List[Dict[str, Any]] = []
+
+    for page in range(1, D2B_MAX_PAGES + 1):
+        params = {
+            "serviceKey": key,
+            "pageNo": str(page),
+            "numOfRows": str(D2B_NUM_OF_ROWS),
+            "anmtDateBegin": bgn,
+            "anmtDateEnd": end,
+        }
+        try:
+            r = sess.get(url, params=params, timeout=HTTP_TIMEOUT)
+            r.raise_for_status()
+        except Exception as e:
+            print(f"[D2B API ERROR] p{page}: {e}")
+            break
+
+        try:
+            root = ET.fromstring(r.text)
+        except ET.ParseError:
+            print(f"[D2B API ERROR] p{page}: XML 파싱 실패 → {r.text[:180]}")
+            break
+
+        header = root.find("header")
+        code = _d2b_text(header, "resultCode") or "00"
+        if code not in ("00", "0"):
+            print(f"[D2B API WARN] resultCode={code} msg={_d2b_text(header, 'resultMsg')}")
+            break
+
+        body = root.find("body")
+        items = body.findall("items/item") if body is not None else []
+        if not items:
+            break
+
+        for it in items:
+            pblanc_no = _d2b_text(it, "pblancNo")
+            pblanc_odr = _d2b_text(it, "pblancOdr")
+            uid = f"{pblanc_no}-{pblanc_odr}" if pblanc_odr else pblanc_no
+            if not uid or uid in seen:
+                continue
+            seen.add(uid)
+
+            title = _d2b_text(it, "bidNm")
+            agency = _d2b_text(it, "ornt") or "미지정 기관"
+            sr = calculate_score(title, agency=agency)
+            print(f"[D2B 검토] {sr.score:3d} {sr.tier} | {title} | {sr.reason_text}")
+
+            if sr.tier in (TIER_DROP,) or sr.score < min_score:
+                continue
+
+            # 입찰서제출마감일 > 개찰일시 순으로 표시용 마감일 결정
+            deadline = (
+                _d2b_text(it, "biddocPresentnClosDt")
+                or _d2b_text(it, "opengDt")
+                or "진행중"
+            )
+
+            results.append({
+                "bid_no": uid,
+                "bid_name": title,
+                "order_agency": agency,
+                "bid_date": deadline,
+                "score": sr.score,
+                "tier": sr.tier,
+                "matched": sr.matched_flat,
+                "reasons": sr.reasons,
+                "eligibility": sr.eligibility,
+                "source": "D2B",
+            })
+
+        total = _to_int(_d2b_text(body, "totalCount"))
+        if page * D2B_NUM_OF_ROWS >= total:
+            break
+
+    results.sort(key=lambda b: (-b["score"], b["bid_name"]))
+    print(f"--- D2B 수집 {len(seen)}건 / 통과 {len(results)}건 ---")
+    return results
 
 
 def escape(s: Any) -> str:
