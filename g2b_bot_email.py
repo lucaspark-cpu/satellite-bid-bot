@@ -145,6 +145,14 @@ def build_email_html(bids):
             </div>
             """
 
+        d2b_alt_html = ""
+        if is_d2b and bid.get('d2b_dcs_no'):
+            d2b_alt_html = f"""
+            <div style="font-size: 12px; color: #718096; margin-top: 2px;">
+                ♦ 검색 안 될 경우 판단번호로 재시도: <span style="background-color: #edf2f7; padding: 1px 5px; border-radius: 3px; font-family: monospace;">{escape(bid['d2b_dcs_no'])}</span>
+            </div>
+            """
+
         if is_d2b:
             button_html = """
             <div style="margin-top: 14px;">
@@ -218,6 +226,7 @@ def build_email_html(bids):
             <div style="font-size: 13px; color: #4a5568;">
                 ♦ <strong>마감일시:</strong> <span style="color: #e53e3e; font-weight: bold;">{escape(bid.get('bid_date', '진행중'))}</span>
             </div>
+            {d2b_alt_html}
             {rfp_html}
             {elig_html}
             {why_html}
