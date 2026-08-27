@@ -5,14 +5,14 @@ test_scoring.py — 라벨 데이터로 스코어링 규칙을 회귀 검증한�
 
 판정 기준
   TIER-A : tier == '상'  또는 (tier == '중' and score >= 35)   ← "상 또는 high 중"
-  TIER-B : tier != '상'  and tier != '제외'  (= '중'에 안착)
+  TIER-B : tier in ('중', '하')  (= 제외되지 않고 최소 '하' 이상 안착; 신호가 약하면 '하'도 정상)
   TIER-B-감리 : tier == '제외' (다비오 스코프 아님. 근거는 가이드 문서 참조)
   OUT-OF-SCOPE : tier == '제외'
   TIER-C : tier == '제외'
 """
 import unittest
 
-from dabeeo_bid_master import calculate_score, TIER_HIGH, TIER_MID, TIER_DROP
+from dabeeo_bid_master import calculate_score, TIER_HIGH, TIER_MID, TIER_LOW, TIER_DROP
 
 HIGH_CUT_MID = 35  # 'high 중' 하한
 
@@ -200,7 +200,7 @@ class TestTierB(unittest.TestCase):
         fails = []
         for t in TIER_B:
             r = calculate_score(t)
-            if r.tier != TIER_MID:
+            if r.tier not in (TIER_MID, TIER_LOW):
                 fails.append(f"  [B] {r.tier}/{r.score:3d} {t}\n        {r.reason_text}")
         self.assertFalse(fails, "TIER-B 실패:\n" + "\n".join(fails))
 
@@ -256,7 +256,7 @@ def report():
          lambda r: r.tier == TIER_HIGH or (r.tier == TIER_MID and r.score >= HIGH_CUT_MID)),
         ("TIER-U (카탈로그 과소반영 역량 → 제외 금지)", TIER_U,
          lambda r: r.tier != TIER_DROP),
-        ("TIER-B (인접 → 중)", TIER_B, lambda r: r.tier == TIER_MID),
+        ("TIER-B (인접 → 중/하)", TIER_B, lambda r: r.tier in (TIER_MID, TIER_LOW)),
         ("TIER-B 감리 (→ 제외)", TIER_B_DROP, lambda r: r.tier == TIER_DROP),
         ("범위 밖 (공모/국제기구)", OUT_OF_SCOPE, lambda r: r.tier == TIER_DROP),
         ("TIER-C (노이즈 → 제외)", TIER_C, lambda r: r.tier == TIER_DROP),
