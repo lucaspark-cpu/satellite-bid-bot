@@ -33,15 +33,18 @@ RECEIVER_EMAIL = os.environ.get("RECEIVER_EMAIL", "")
 SEARCH_KEYWORDS_STR = "위성영상, 초소형위성, 정사영상, 항공사진, 원격탐사, 변화탐지, 객체탐지, 공간정보, 지리정보, 학습데이터, 드론, 판독"
 
 
-def _friendly_summary(tier: str, matched: list, reasons: list) -> str:
+def _friendly_summary(tier: str, matched: list, reasons: list, matched_project: str = "") -> str:
     """비개발자 친화적 요약: 점수/레이어 용어 대신 평문 설명"""
     top_kw = " · ".join(matched[:4]) if matched else "관련 키워드"
     primary_kw = matched[0] if matched else "핵심"
     has_cross = any("동시출현" in str(r) or "보너스" in str(r) for r in reasons)
     has_agency = any("화이트리스트" in str(r) or "발주기관" in str(r) for r in reasons)
     has_price = any("추정가격" in str(r) or "예산" in str(r) for r in reasons)
+    has_won_match = any("제안/투찰 이력" in str(r) for r in reasons)
 
-    if tier == "상":
+    if has_won_match and matched_project:
+        base = f"Dabeeo가 실제 제안·투찰까지 진행했던 「{matched_project}」와 같은 유형입니다"
+    elif tier == "상":
         base = f"Dabeeo가 수주한 {primary_kw} 사업과 같은 유형입니다"
     else:
         base = f"Dabeeo의 {primary_kw} 역량과 연관된 공고입니다"
@@ -53,7 +56,8 @@ def _friendly_summary(tier: str, matched: list, reasons: list) -> str:
         extras.append("Dabeeo와 거래 이력이 있는 발주기관입니다")
     if has_price:
         extras.append("예산 규모가 참여 기준 이상입니다")
-    extras.append(f"매칭 키워드: {top_kw}")
+    if not has_won_match:
+        extras.append(f"매칭 키워드: {top_kw}")
 
     return (base + " — " + " / ".join(extras)) if extras else base
 
@@ -206,7 +210,7 @@ def build_email_html(bids):
             </div>
             <div style="margin-bottom:6px;">{chips}</div>
             <div style="font-size: 11px; color: #4a5568; line-height:1.6;">
-                {escape(_friendly_summary(tier_label, matched, reasons))}
+                {escape(_friendly_summary(tier_label, matched, reasons, bid.get('matched_project') or ''))}
             </div>
         </div>
         """
