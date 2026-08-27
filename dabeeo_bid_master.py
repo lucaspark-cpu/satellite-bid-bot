@@ -462,7 +462,47 @@ ELIGIBILITY_PATTERNS: Dict[str, str] = {
     r"g[\s-]?pass": "G-PASS 지정",
 }
 
-# --- L6 추정가격 밴드 (필드명 미검증) ---------------------------------------
+# --- L0.5 실제 제안/투찰 이력 (Lucas 정리, 2026-08) -------------------------
+# '검토/모니터링만' 한 건이나 'RFP까지 갔다 드롭'한 건은 제외하고,
+# 다비오가 실제로 제안서·입찰서를 제출까지 진행한 건만 포함한다.
+# 새 공고 제목이 이 패턴과 min_hits 이상 겹치면 통상 스코어링을 건너뛰고
+# 즉시 '상'으로 고정한다 (하드제외/범위밖 판정보다도 우선 적용).
+WON_BID_PROJECTS: List[Dict[str, Any]] = [
+    {
+        "name": "도미니카(공) ICT기반 국립공원 기후변화 모니터링 역량 고도화 사업 PC1(시스템구축) 용역",
+        "required": ["도미니카", "국립공원"],  # '도미니카' 단독으로는 무관한 '도미니카 ODA 감리용역'과 충돌
+    },
+    {
+        "name": "KSIS 데이터 기반 초소형위성 활용시스템 개발 및 시험 용역",
+        "required": ["ksis"],  # 유일 식별 가능한 고유어(다른 항우연 건과 구분) — normalize()가 소문자화하므로 소문자로 매칭
+    },
+    {
+        "name": "초소형위성체계 활용시스템 예비설계 및 활용기술 개발 용역",
+        "required": ["초소형위성", "활용시스템", "예비설계"],  # 3개 모두 겹쳐야 매칭
+    },
+    {
+        "name": "파주시 정사영상 제작 사업",
+        "required": ["파주", "정사영상"],
+    },
+    {
+        "name": "군사지도 구축 사업",
+        "required": ["군사지도"],
+    },
+    {
+        "name": "군수지도 제작 용역",
+        "required": ["군수지도"],
+    },
+]
+
+
+def _match_won_project(compact_title: str) -> Optional[Dict[str, Any]]:
+    for proj in WON_BID_PROJECTS:
+        required = proj["required"]
+        if all(kw in compact_title for kw in required):
+            return {"name": proj["name"], "hits": required}
+    return None
+
+
 PRICE_FLOOR = 30_000_000          # 3천만원 미달 → 감점
 PRICE_FLOOR_PENALTY = -15
 
@@ -668,6 +708,7 @@ class ScoreResult:
     exclude_reason: str = ""
     out_of_scope: bool = False
     eligibility: List[str] = field(default_factory=list)  # 사람 검토 필요 자격
+    matched_project: Optional[str] = None  # 실제 제안/투찰 이력과 매칭된 경우 그 사업명
 
     # 기존 호출부 `score, reasons = calculate_score(title)` 하위호환
     def __iter__(self):
@@ -720,6 +761,18 @@ def calculate_score(
     res = ScoreResult()
     n = normalize(title)
     agency_n = normalize(agency or "")
+
+    # ---- L0.5 실제 제안/투찰 이력 매칭 → 다른 판정보다 최우선으로 '상' 고정 --
+    won = _match_won_project(n.compact)
+    if won:
+        res.score = 100
+        res.tier = TIER_HIGH
+        res.hurdle = True
+        res.cooccur = True
+        res.matched = {"core": won["hits"]}
+        res.matched_project = won["name"]
+        res.reasons.append(f"과거 실제 제안/투찰 이력과 동일 유형('{won['name']}') → 상 고정")
+        return res
 
     # ---- L1 범위 판정 -----------------------------------------------------
     oos = _first_regex_hit(OUT_OF_SCOPE_PATTERNS, n.spaced)
@@ -1107,6 +1160,7 @@ def fetch_g2b_bids(
                     "matched": sr.matched_flat,
                     "reasons": sr.reasons,
                     "eligibility": sr.eligibility,
+                    "matched_project": sr.matched_project,
                     "source": "G2B",
                 })
 
@@ -1245,6 +1299,7 @@ def fetch_d2b_bids(days: int = 3, min_score: int = SCORE_MID_CUT) -> List[Dict[s
                 "matched": sr.matched_flat,
                 "reasons": sr.reasons,
                 "eligibility": sr.eligibility,
+                "matched_project": sr.matched_project,
                 "source": "D2B",
                 "d2b_dcs_no": dcs_no,        # 검증용: 판단번호(구매요청번호)
                 "d2b_internal_no": uid,       # 검증용: D2B 내부 관리번호(기존값)
