@@ -97,7 +97,8 @@ TIER_LOW = "하"
 TIER_DROP = "제외"
 
 SCORE_HIGH_CUT = 50         # README 기준 유지
-SCORE_MID_CUT = 20          # 20점 미만은 리포트 제외
+SCORE_MID_CUT = 35          # 35점 미만은 '하'(약한 신호, 참고용)로 강등
+SCORE_LOW_CUT = 20          # 20점 미만은 리포트 완전 제외
 SCORE_CAP = 100
 
 # =============================================================================
@@ -904,9 +905,12 @@ def calculate_score(
 
     strong_domain = res.cooccur or len(domain_cores) >= 2
 
-    if score < SCORE_MID_CUT:
+    if score < SCORE_LOW_CUT:
         res.tier = TIER_DROP
-        res.reasons.append(f"{SCORE_MID_CUT}점 미만 → 리포트 제외")
+        res.reasons.append(f"{SCORE_LOW_CUT}점 미만 → 리포트 제외")
+    elif score < SCORE_MID_CUT:
+        res.tier = TIER_LOW
+        res.reasons.append(f"{score}점 — 약한 신호 하나만 매칭 → 하(참고용)")
     elif score < SCORE_HIGH_CUT:
         res.tier = TIER_MID
     else:
@@ -1080,7 +1084,7 @@ def fetch_g2b_bids(
     keywords: Optional[Sequence[str]] = None,
     days: int = 3,
     operation: str = G2B_SERVC_OP,
-    min_score: int = SCORE_MID_CUT,
+    min_score: int = SCORE_LOW_CUT,
 ) -> List[Dict[str, Any]]:
     """시드 키워드별로 bidNtceNm 필터를 걸어 다중 질의 + 페이지네이션 수집."""
     init_db()
@@ -1205,7 +1209,7 @@ def _d2b_text(el: Optional["ET.Element"], tag: str) -> str:
     return (child.text or "").strip() if child is not None and child.text else ""
 
 
-def fetch_d2b_bids(days: int = 3, min_score: int = SCORE_MID_CUT) -> List[Dict[str, Any]]:
+def fetch_d2b_bids(days: int = 3, min_score: int = SCORE_LOW_CUT) -> List[Dict[str, Any]]:
     """국내 경쟁입찰공고 목록(getDmstcCmpetBidPblancList)을 공고일자 구간으로 수집.
 
     D2B는 상세페이지 직접 링크를 제공하지 않으므로(README FAQ 참고) bid_url은
