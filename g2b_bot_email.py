@@ -14,6 +14,7 @@ from dabeeo_bid_master import (
     RECEIVERS,
     TIER_HIGH,
     TIER_MID,
+    TIER_LOW,
 )
 
 # 옵션: D2B 수집 함수가 존재할 경우에만 동적 임포트
@@ -111,34 +112,25 @@ def build_email_html(bids):
             <div>
     """
 
-    # '상 → 중' 등급 순으로 정렬
-    ordered = sorted(
-        bids,
+    # '상 → 중' 등급 순으로 정렬 ('하'는 별도 접힌 섹션으로 분리)
+    ordered_main = sorted(
+        (b for b in bids if (b.get('tier') or TIER_MID) != TIER_LOW),
         key=lambda b: (0 if b.get('tier') == TIER_HIGH else 1, -int(b.get('score', 0) or 0)),
     )
-    current_tier = None
-    for bid in ordered:
+    ordered_low = sorted(
+        (b for b in bids if (b.get('tier') or TIER_MID) == TIER_LOW),
+        key=lambda b: -int(b.get('score', 0) or 0),
+    )
+
+    def _render_bid_card(bid, muted=False):
         tier = bid.get('tier') or TIER_MID
-        if tier != current_tier:
-            current_tier = tier
-            count = sum(1 for x in ordered if (x.get('tier') or TIER_MID) == tier)
-            label, color, border = (
-                ("상 (핵심 타겟) 🎯", "#c53030", "#e53e3e")
-                if tier == TIER_HIGH
-                else ("중 (검토 권장) 🔍", "#d69e2e", "#ed8936")
-            )
-            html += f"""
-            <h3 style="font-size: 16px; font-weight: bold; color: {color}; border-bottom: 2px solid {border}; padding-bottom: 6px; margin: 24px 0 16px 0;">
-                {label} ({count}건)
-            </h3>
-            """
-        accent = "#e53e3e" if tier == TIER_HIGH else "#ed8936"
+        accent = "#a0aec0" if muted else ("#e53e3e" if tier == TIER_HIGH else "#ed8936")
 
         is_d2b = (
             'D2B' in str(bid.get('source', '')).upper()
             or '국방' in str(bid.get('order_agency', ''))
         )
-        tag_bg = "#ed8936" if is_d2b else "#3182ce"
+        tag_bg = "#a0aec0" if muted else ("#ed8936" if is_d2b else "#3182ce")
         tag_text = "D2B 경쟁입찰" if is_d2b else "G2B 일반용역"
 
         rfp_html = ""
@@ -196,8 +188,8 @@ def build_email_html(bids):
             )
 
         tier_label = bid.get('tier', '중')
-        tier_color = "#276749" if tier_label == "상" else "#744210"
-        tier_bg = "#c6f6d5" if tier_label == "상" else "#fefcbf"
+        tier_color = {"상": "#276749", "중": "#744210", "하": "#4a5568"}.get(tier_label, "#744210")
+        tier_bg = {"상": "#c6f6d5", "중": "#fefcbf", "하": "#e2e8f0"}.get(tier_label, "#fefcbf")
 
         why_html = f"""
         <div style="margin-top: 10px; padding-top: 8px; border-top: 1px dashed #cbd5e0;">
@@ -215,8 +207,8 @@ def build_email_html(bids):
         </div>
         """
 
-        html += f"""
-        <div style="background-color: #f7fafc; border-left: 4px solid {accent}; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
+        return f"""
+        <div style="background-color: {'#f9fafb' if muted else '#f7fafc'}; border-left: 4px solid {accent}; border-radius: 4px; padding: 16px; margin-bottom: 16px;">
             <div style="font-size: 15px; font-weight: bold; color: #1a202c; margin-bottom: 10px;">
                 <span style="background-color: {tag_bg}; color: #ffffff; font-size: 11px; padding: 2px 6px; border-radius: 3px; margin-right: 6px; vertical-align: middle;">{tag_text}</span>
                 {"<span style='background:#9ae6b4;color:#22543d;font-size:11px;padding:2px 6px;border-radius:3px;margin-right:4px;vertical-align:middle;font-weight:bold;'>🆕 신규</span>" if bid.get("is_new") else ""}{escape(bid['bid_name'])}
@@ -236,6 +228,37 @@ def build_email_html(bids):
             {why_html}
             {button_html}
         </div>
+        """
+
+    current_tier = None
+    for bid in ordered_main:
+        tier = bid.get('tier') or TIER_MID
+        if tier != current_tier:
+            current_tier = tier
+            count = sum(1 for x in ordered_main if (x.get('tier') or TIER_MID) == tier)
+            label, color, border = (
+                ("상 (핵심 타겟) 🎯", "#c53030", "#e53e3e")
+                if tier == TIER_HIGH
+                else ("중 (검토 권장) 🔍", "#d69e2e", "#ed8936")
+            )
+            html += f"""
+            <h3 style="font-size: 16px; font-weight: bold; color: {color}; border-bottom: 2px solid {border}; padding-bottom: 6px; margin: 24px 0 16px 0;">
+                {label} ({count}건)
+            </h3>
+            """
+        html += _render_bid_card(bid)
+
+    if ordered_low:
+        low_cards = "".join(_render_bid_card(bid, muted=True) for bid in ordered_low)
+        html += f"""
+        <details style="margin-top: 24px; border-top: 2px solid #cbd5e0; padding-top: 12px;">
+            <summary style="cursor: pointer; font-size: 15px; font-weight: bold; color: #718096; padding-bottom: 8px;">
+                하 (참고, 관련도 낮음) — {len(ordered_low)}건 펼쳐서 보기
+            </summary>
+            <div style="margin-top: 12px;">
+                {low_cards}
+            </div>
+        </details>
         """
 
     html += """
