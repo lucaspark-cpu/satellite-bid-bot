@@ -12,6 +12,7 @@ import os
 import re
 import smtplib
 import sys
+import time
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
@@ -83,7 +84,12 @@ def is_match(title: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def fetch_bids() -> list[dict]:
-    """최근 LOOKBACK_DAYS 기간의 용역 입찰공고를 조회한다."""
+    """최근 LOOKBACK_DAYS 기간의 용역 입찰공고를 조회한다.
+
+    apis.data.go.kr는 GitHub Actions 러너 IP를 간헐적으로 막는 경우가 있어,
+    같은 실행 안에서 몇 차례 재시도한다. (러너 자체는 매 실행마다 새로 배정되므로
+    스케줄 실행 간에는 자연스럽게 다른 IP로 재시도되는 효과도 있음.)
+    """
     now = datetime.now(timezone(timedelta(hours=9)))
     begin = now - timedelta(days=LOOKBACK_DAYS)
 
@@ -97,10 +103,21 @@ def fetch_bids() -> list[dict]:
         "pageNo": "1",
     }
 
-    resp = requests.get(API_BASE_URL, params=params, timeout=30)
-    resp.raise_for_status()
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            resp = requests.get(API_BASE_URL, params=params, timeout=30)
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            print(f"[WARN] 공고 조회 {attempt}차 시도 실패: {exc}", file=sys.stderr)
+            if attempt < 3:
+                time.sleep(10 * attempt)
+    else:
+        raise RuntimeError(f"공고 조회 3회 재시도 모두 실패: {last_exc}")
 
-    data = resp.json()
     header = data.get("response", {}).get("header", {})
     if header.get("resultCode") not in ("00", 0, "0"):
         raise RuntimeError(f"G2B API 오류: {header}")
