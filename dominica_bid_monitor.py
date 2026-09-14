@@ -1,16 +1,20 @@
 """
-"도미니카" 관련 나라장터 입찰공고를 감시해 매 실행마다 이메일로 상태를 보고한다.
+"도미니카" 관련 나라장터 입찰공고를 감시한다.
 
-- 최근 7일 공고는 있든 없든 매번 이메일 발송 (상단에 정리)
-- 최근 30일 이력은 별도 리스트로 함께 정리 (8~30일 전, 최근 7일과 중복 제외)
+- lucas.park@dabeeo.com (본인): 매 실행마다 항상 전체 리포트 발송
+  (최근 7일 상단 + 8~30일 이력, 있든 없든)
+- team_biz-plan@dabeeo.com, injun.park@dabeeo.com, lucas.park@dabeeo.com: 최근 3일 이내
+  "신규" 공고(이전에 알림 보낸 적 없는 건)가 있을 때만 별도 알림 메일 발송.
+  신규가 없으면 이 알림은 아예 보내지 않음.
 - 취소/변경/재공고 등 공고 종류에 상관없이 제목에 "도미니카"가 들어간 건 모두 포함
 
-실행 주기: GitHub Actions에서 하루 3회(09:00 / 13:00 / 17:00 KST) 호출.
+실행 주기: GitHub Actions에서 하루 3회(08:00 / 13:00 / 17:00 KST) 호출.
 """
 
 from __future__ import annotations
 
 import html
+import json
 import os
 import smtplib
 import sys
@@ -19,6 +23,7 @@ import unicodedata
 import urllib.parse
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
+from pathlib import Path
 
 import requests
 
@@ -26,20 +31,28 @@ import requests
 # 설정 (코드 내에서 직접 수정)
 # ---------------------------------------------------------------------------
 
-# 수신자 이메일 - 여기서 직접 추가/삭제
-RECIPIENTS: list[str] = [
+# 매 실행마다 항상 전체 리포트를 받는 사람
+ALWAYS_RECIPIENTS: list[str] = [
+    "lucas.park@dabeeo.com",
+]
+
+# 최근 3일 이내 "신규" 공고가 있을 때만 알림을 받는 사람
+NEW_ALERT_RECIPIENTS: list[str] = [
     "team_biz-plan@dabeeo.com",
-    "lucas.park@dabeeo.com".
-    "injun.park@dabeeo.com"
+    "injun.park@dabeeo.com",
+    "lucas.park@dabeeo.com",
 ]
 
 # 판정 키워드: 제목에 이 단어만 포함되면 매칭 (취소/변경/재공고 등 종류 무관)
 BASE_KEYWORD = "도미니카"
 
-RECENT_DAYS = 7    # 이 기간은 매번 상단에 정리
-HISTORY_DAYS = 30  # 이 기간 전체를 조회하고, RECENT_DAYS 이전 것만 이력 리스트로 별도 정리
+RECENT_DAYS = 7    # 본인 리포트 상단에 매번 정리하는 기간
+HISTORY_DAYS = 30  # 이 기간 전체를 조회 (data.go.kr 조회기간 제한상 30일 이내 유지)
+NEW_DAYS = 3       # 이 기간 이내 + 이전에 알림 보낸 적 없는 건 = "신규"로 간주
 
 KST = timezone(timedelta(hours=9))
+
+STATE_FILE = Path(__file__).parent / "sent_bids.json"  # 신규 알림을 이미 보낸 공고 id 기록
 
 # 나라장터 검색조건에 의한 입찰공고 서비스(공공데이터포털) - 용역
 # NOTE: 기존 satellite-bid-bot(dabeeo_bid_master.py)에서 실제로 검증된 값 그대로 사용.
@@ -82,6 +95,12 @@ def parse_notice_dt(item: dict) -> datetime | None:
     return None
 
 
+def bid_uid(item: dict) -> str:
+    bid_no = str(item.get("bidNtceNo") or "").strip()
+    ord_no = str(item.get("bidNtceOrd") or "").strip()
+    return f"{bid_no}-{ord_no}" if ord_no else bid_no
+
+
 # ---------------------------------------------------------------------------
 # API 조회
 # ---------------------------------------------------------------------------
@@ -102,8 +121,8 @@ def _get_with_retry(params: dict) -> dict:
     raise RuntimeError(f"공고 조회 3회 재시도 모두 실패: {last_exc}")
 
 
-def fetch_bids_90d() -> list[dict]:
-    """최근 HISTORY_DAYS 기간의 "도미니카" 관련 용역 입찰공고를 전부 조회한다 (data.go.kr 조회기간 제한상 30일 이내 유지).
+def fetch_bids_history() -> list[dict]:
+    """최근 HISTORY_DAYS 기간의 "도미니카" 관련 용역 입찰공고를 전부 조회한다.
 
     취소/변경/재공고를 걸러내지 않도록 bidClseExcpYn(마감 제외) 파라미터는 쓰지 않는다.
     """
@@ -149,9 +168,7 @@ def fetch_bids_90d() -> list[dict]:
             break
 
         for it in items:
-            bid_no = str(it.get("bidNtceNo") or "").strip()
-            ord_no = str(it.get("bidNtceOrd") or "").strip()
-            uid = f"{bid_no}-{ord_no}" if ord_no else bid_no
+            uid = bid_uid(it)
             if not uid or uid in seen:
                 continue
             seen.add(uid)
@@ -162,6 +179,25 @@ def fetch_bids_90d() -> list[dict]:
             break  # 마지막 페이지
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# 상태(신규 알림 이력) 관리
+# ---------------------------------------------------------------------------
+
+def load_sent_ids() -> set[str]:
+    if not STATE_FILE.exists():
+        return set()
+    try:
+        return set(json.loads(STATE_FILE.read_text(encoding="utf-8")))
+    except (json.JSONDecodeError, OSError):
+        return set()
+
+
+def save_sent_ids(ids: set[str]) -> None:
+    STATE_FILE.write_text(
+        json.dumps(sorted(ids), ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +244,23 @@ def _bid_card_html(item: dict) -> str:
     """
 
 
-def build_email_html(recent: list[dict], history: list[dict]) -> str:
+def _email_shell(title: str, body_html: str) -> str:
+    return f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"></head>
+    <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
+                 color:#333333;line-height:1.6;margin:0;padding:20px;background-color:#ffffff;">
+      <div style="max-width:700px;margin:0 auto;">
+        <h2 style="font-size:20px;font-weight:bold;color:#1a202c;margin-bottom:16px;">
+          {title}
+        </h2>
+        {body_html}
+      </div>
+    </body></html>
+    """
+
+
+def build_full_report_html(recent: list[dict], history: list[dict]) -> str:
     recent_section = (
         "".join(_bid_card_html(b) for b in recent)
         if recent
@@ -219,17 +271,7 @@ def build_email_html(recent: list[dict], history: list[dict]) -> str:
         if history
         else '<p style="font-size:13px;color:#718096;">8~30일 전 이력이 없습니다.</p>'
     )
-
-    return f"""
-    <!DOCTYPE html>
-    <html><head><meta charset="utf-8"></head>
-    <body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;
-                 color:#333333;line-height:1.6;margin:0;padding:20px;background-color:#ffffff;">
-      <div style="max-width:700px;margin:0 auto;">
-        <h2 style="font-size:20px;font-weight:bold;color:#1a202c;margin-bottom:16px;">
-          🔎 "도미니카" 입찰공고 모니터링
-        </h2>
-
+    body = f"""
         <h3 style="font-size:15px;font-weight:bold;color:#2b6cb0;border-bottom:2px solid #3182ce;
                    padding-bottom:6px;margin:20px 0 12px 0;">
           최근 7일 ({len(recent)}건)
@@ -241,25 +283,34 @@ def build_email_html(recent: list[dict], history: list[dict]) -> str:
           이력 (8~30일 전, {len(history)}건)
         </h3>
         {history_section}
-      </div>
-    </body></html>
     """
+    return _email_shell('🔎 "도미니카" 입찰공고 모니터링', body)
 
 
-def send_html_email(subject: str, html_body: str) -> None:
+def build_new_alert_html(new_items: list[dict]) -> str:
+    body = f"""
+        <p style="font-size:13px;color:#4a5568;margin-bottom:16px;">
+          최근 {NEW_DAYS}일 이내 새로 올라온 "도미니카" 관련 공고입니다.
+        </p>
+        {"".join(_bid_card_html(b) for b in new_items)}
+    """
+    return _email_shell(f'🆕 "도미니카" 신규 입찰공고 {len(new_items)}건', body)
+
+
+def send_html_email(recipients: list[str], subject: str, html_body: str) -> None:
     if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
         raise RuntimeError("GMAIL_ADDRESS / GMAIL_APP_PASSWORD 환경변수가 설정되지 않았습니다.")
-    if not RECIPIENTS:
-        raise RuntimeError("RECIPIENTS 목록이 비어 있습니다.")
+    if not recipients:
+        raise RuntimeError("수신자 목록이 비어 있습니다.")
 
     msg = MIMEText(html_body, "html", _charset="utf-8")
     msg["Subject"] = subject
     msg["From"] = GMAIL_ADDRESS
-    msg["To"] = ", ".join(RECIPIENTS)
+    msg["To"] = ", ".join(recipients)
 
     with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
-        server.sendmail(GMAIL_ADDRESS, RECIPIENTS, msg.as_string())
+        server.sendmail(GMAIL_ADDRESS, recipients, msg.as_string())
 
 
 # ---------------------------------------------------------------------------
@@ -268,19 +319,20 @@ def send_html_email(subject: str, html_body: str) -> None:
 
 def main() -> int:
     try:
-        all_bids = fetch_bids_90d()
+        all_bids = fetch_bids_history()
     except Exception as exc:  # noqa: BLE001
         print(f"[ERROR] 공고 조회 실패: {exc}", file=sys.stderr)
         return 1
 
     now = datetime.now(KST)
-    cutoff = now - timedelta(days=RECENT_DAYS)
+    recent_cutoff = now - timedelta(days=RECENT_DAYS)
+    new_cutoff = now - timedelta(days=NEW_DAYS)
 
     recent: list[dict] = []
     history: list[dict] = []
     for item in all_bids:
         dt = parse_notice_dt(item)
-        if dt is not None and dt >= cutoff:
+        if dt is not None and dt >= recent_cutoff:
             recent.append(item)
         else:
             history.append(item)
@@ -288,21 +340,49 @@ def main() -> int:
     recent.sort(key=lambda b: b.get("bidNtceDt", ""), reverse=True)
     history.sort(key=lambda b: b.get("bidNtceDt", ""), reverse=True)
 
-    if recent:
-        subject = f'[입찰알림] 최근 7일 "도미니카" 공고 {len(recent)}건'
-    else:
-        subject = '[입찰알림] 최근 7일 "도미니카" 공고 없음'
+    ok = True
 
-    html_body = build_email_html(recent, history)
-
+    # 1) 본인용 전체 리포트: 항상 발송
+    subject = (
+        f'[입찰알림] 최근 7일 "도미니카" 공고 {len(recent)}건'
+        if recent
+        else '[입찰알림] 최근 7일 "도미니카" 공고 없음'
+    )
     try:
-        send_html_email(subject, html_body)
+        send_html_email(ALWAYS_RECIPIENTS, subject, build_full_report_html(recent, history))
+        print(f"[전체 리포트] 발송 완료 (최근 7일 {len(recent)}건 / 이력 {len(history)}건)")
     except Exception as exc:  # noqa: BLE001
-        print(f"[ERROR] 이메일 발송 실패: {exc}", file=sys.stderr)
-        return 1
+        print(f"[ERROR] 전체 리포트 발송 실패: {exc}", file=sys.stderr)
+        ok = False
 
-    print(f"이메일 발송 완료 (최근 7일 {len(recent)}건 / 이력 {len(history)}건)")
-    return 0
+    # 2) 신규 알림: 최근 NEW_DAYS 이내 + 이전에 알림 보낸 적 없는 건만, 있을 때만 발송
+    sent_ids = load_sent_ids()
+    new_items = [
+        b for b in all_bids
+        if (dt := parse_notice_dt(b)) is not None
+        and dt >= new_cutoff
+        and bid_uid(b) not in sent_ids
+    ]
+    new_items.sort(key=lambda b: b.get("bidNtceDt", ""), reverse=True)
+
+    if not new_items:
+        print("[신규 알림] 신규 공고 없음 - 발송 생략")
+    else:
+        try:
+            send_html_email(
+                NEW_ALERT_RECIPIENTS,
+                f'[입찰알림] "도미니카" 신규 공고 {len(new_items)}건 (최근 {NEW_DAYS}일)',
+                build_new_alert_html(new_items),
+            )
+            sent_ids.update(bid_uid(b) for b in new_items if bid_uid(b))
+            save_sent_ids(sent_ids)
+            print(f"[신규 알림] 발송 완료 ({len(new_items)}건)")
+        except Exception as exc:  # noqa: BLE001
+            # 발송 실패 시 상태를 갱신하지 않아 다음 실행에서 재시도된다.
+            print(f"[ERROR] 신규 알림 발송 실패: {exc}", file=sys.stderr)
+            ok = False
+
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
