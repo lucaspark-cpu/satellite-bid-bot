@@ -26,7 +26,7 @@ jobs:
 
       - name: 모니터링 스크립트 실행
         env:
-          G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+          G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
           GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
         run: python dominica_bid_monitor.py
