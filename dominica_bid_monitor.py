@@ -124,6 +124,17 @@ def fetch_bids_90d() -> list[dict]:
         }
         data = _get_with_retry(params)
 
+        # 정상 스키마: {"response": {"header": {...}, "body": {...}}}
+        # 오류(인증/트래픽 등) 시 다른 스키마로 오는 경우가 있어, 그 경우 전체 응답을 그대로 노출한다.
+        if "response" not in data:
+            alt = data.get("OpenAPI_ServiceResponse", {}).get("cmmMsgHeader", {})
+            if alt:
+                raise RuntimeError(
+                    f"G2B API 오류: {alt.get('errMsg')} / {alt.get('returnAuthMsg')} "
+                    f"(returnReasonCode={alt.get('returnReasonCode')})"
+                )
+            raise RuntimeError(f"G2B API 오류: 예상치 못한 응답 형식 → {data}")
+
         header = data.get("response", {}).get("header", {})
         if header.get("resultCode") not in ("00", 0, "0"):
             raise RuntimeError(f"G2B API 오류: {header}")
