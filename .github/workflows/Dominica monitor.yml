@@ -24,14 +24,6 @@ jobs:
       - name: 의존성 설치
         run: pip install -r requirements.txt
 
-      - name: apis.data.go.kr 접속 진단 (임시)
-        continue-on-error: true
-        run: |
-          echo "--- 일반 사이트 접속 테스트 (러너 자체 네트워크 확인) ---"
-          curl -sS -m 10 -o /dev/null -w "httpbin status: %{http_code}\n" https://httpbin.org/get || true
-          echo "--- apis.data.go.kr 접속 테스트 ---"
-          curl -v -m 15 "https://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServcPPSSrch?serviceKey=test&type=json&numOfRows=1&pageNo=1" || true
-
       - name: 모니터링 스크립트 실행
         env:
           G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
