@@ -46,7 +46,7 @@ EXTRA_KEYWORDS: list[str] = [
 ]
 
 # 조회 대상 기간 (일). 공고가 늦게 게시되는 경우를 대비해 여유 있게 잡음.
-LOOKBACK_DAYS = 14
+LOOKBACK_DAYS = 30
 
 STATE_FILE = Path(__file__).parent / "sent_bids.json"
 
