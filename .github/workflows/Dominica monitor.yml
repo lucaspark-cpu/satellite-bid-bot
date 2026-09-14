@@ -25,6 +25,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: 모니터링 스크립트 실행
+        continue-on-error: true  # 간헐적 네트워크 차단으로 인한 실패는 워크플로우 전체를 빨간불로 만들지 않음 (로그엔 그대로 남음)
         env:
           G2B_API_KEY: ${{ secrets.G2B_API_KEY }}
           GMAIL_ADDRESS: ${{ secrets.SMTP_USER }}
