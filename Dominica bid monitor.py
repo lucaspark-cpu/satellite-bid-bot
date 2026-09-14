@@ -25,8 +25,8 @@ import requests
 
 # 수신자 이메일 - 여기서 직접 추가/삭제
 RECIPIENTS: list[str] = [
-    "example1@dabeeo.com",
-    "example2@dabeeo.com",
+    "team_biz-plan@dabeeo.com",
+    "injun.park@dabeeo.com"
 ]
 
 # 판정 키워드: "도미니카"는 필수, 아래 중 1개 이상이 추가로 있어야 알림
