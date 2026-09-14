@@ -14,6 +14,7 @@ import smtplib
 import sys
 import time
 import unicodedata
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -83,6 +84,24 @@ def is_match(title: str) -> bool:
 # API 조회
 # ---------------------------------------------------------------------------
 
+def build_query_url(base_url: str, params: dict) -> str:
+    """serviceKey 이중 인코딩을 방지하며 쿼리 URL을 조립한다.
+
+    data.go.kr은 'Decoding'(원본) 키와 'Encoding'(이미 %인코딩된) 키를 함께
+    제공하는데, Encoding 키를 requests의 params=에 그대로 넘기면 다시
+    인코딩되어(이중 인코딩) 게이트웨이가 400 Bad Request로 거부한다.
+    serviceKey에 '%'가 이미 있으면 그대로 두고, 없으면 정상적으로 인코딩한다.
+    """
+    parts = []
+    for key, value in params.items():
+        value = str(value)
+        if key == "serviceKey" and "%" in value:
+            parts.append(f"{key}={value}")
+        else:
+            parts.append(f"{key}={urllib.parse.quote(value, safe='')}")
+    return f"{base_url}?{'&'.join(parts)}"
+
+
 def fetch_bids() -> list[dict]:
     """최근 LOOKBACK_DAYS 기간의 용역 입찰공고를 조회한다.
 
@@ -103,10 +122,12 @@ def fetch_bids() -> list[dict]:
         "pageNo": "1",
     }
 
+    query_url = build_query_url(API_BASE_URL, params)
+
     last_exc: Exception | None = None
     for attempt in range(1, 4):
         try:
-            resp = requests.get(API_BASE_URL, params=params, timeout=30)
+            resp = requests.get(query_url, timeout=30)
             resp.raise_for_status()
             data = resp.json()
             break
