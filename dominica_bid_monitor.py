@@ -29,6 +29,7 @@ import requests
 # 수신자 이메일 - 여기서 직접 추가/삭제
 RECIPIENTS: list[str] = [
     "team_biz-plan@dabeeo.com",
+    "lucas.park@dabeeo.com".
     "injun.park@dabeeo.com"
 ]
 
