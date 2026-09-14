@@ -50,13 +50,14 @@ LOOKBACK_DAYS = 14
 
 STATE_FILE = Path(__file__).parent / "sent_bids.json"
 
-# 나라장터 입찰공고정보서비스(공공데이터포털) - 용역, 검색조건(공고게시일시 등) 기반 조회
-# NOTE: 아래 URL의 "BidPublicInfoService04" 부분(버전)은 활용신청 문서에 명시되어 있지 않아
-# 추정값임. 공공데이터포털 마이페이지 > 해당 API 상세보기에서 "요청 URL(Request URL)"을
-# 직접 확인해서 실제 값과 다르면 이 줄을 그 값으로 교체할 것. 오퍼레이션명
-# (getBidPblancListInfoServcPPSSrch)은 활용신청 문서 12번 항목 기준으로 정확함.
-API_BASE_URL = "https://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServcPPSSrch"
-SERVICE_KEY = os.environ.get("G2B_API_KEY", "")
+# 나라장터 검색조건에 의한 입찰공고 서비스(공공데이터포털) - 용역
+# NOTE: 기존 satellite-bid-bot(dabeeo_bid_master.py)에서 실제로 검증된 값 그대로 사용.
+G2B_BASE = "https://apis.data.go.kr/1230000/ad/BidPublicInfoService"
+G2B_SERVC_OP = "getBidPblancListInfoServcPPSSrch"
+API_BASE_URL = f"{G2B_BASE}/{G2B_SERVC_OP}"
+
+# 인코딩 키를 넣어도 안전하도록 1회 디코드 (satellite-bid-bot과 동일 방식)
+SERVICE_KEY = urllib.parse.unquote(os.environ.get("G2B_API_KEY", ""))
 
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
@@ -84,30 +85,11 @@ def is_match(title: str) -> bool:
 # API 조회
 # ---------------------------------------------------------------------------
 
-def build_query_url(base_url: str, params: dict) -> str:
-    """serviceKey 이중 인코딩을 방지하며 쿼리 URL을 조립한다.
-
-    data.go.kr은 'Decoding'(원본) 키와 'Encoding'(이미 %인코딩된) 키를 함께
-    제공하는데, Encoding 키를 requests의 params=에 그대로 넘기면 다시
-    인코딩되어(이중 인코딩) 게이트웨이가 400 Bad Request로 거부한다.
-    serviceKey에 '%'가 이미 있으면 그대로 두고, 없으면 정상적으로 인코딩한다.
-    """
-    parts = []
-    for key, value in params.items():
-        value = str(value)
-        if key == "serviceKey" and "%" in value:
-            parts.append(f"{key}={value}")
-        else:
-            parts.append(f"{key}={urllib.parse.quote(value, safe='')}")
-    return f"{base_url}?{'&'.join(parts)}"
-
-
 def fetch_bids() -> list[dict]:
-    """최근 LOOKBACK_DAYS 기간의 용역 입찰공고를 조회한다.
+    """최근 LOOKBACK_DAYS 기간의 용역 입찰공고를 조회한다 (BASE_KEYWORD로 서버단 1차 필터).
 
     apis.data.go.kr는 GitHub Actions 러너 IP를 간헐적으로 막는 경우가 있어,
-    같은 실행 안에서 몇 차례 재시도한다. (러너 자체는 매 실행마다 새로 배정되므로
-    스케줄 실행 간에는 자연스럽게 다른 IP로 재시도되는 효과도 있음.)
+    같은 실행 안에서 몇 차례 재시도한다.
     """
     now = datetime.now(timezone(timedelta(hours=9)))
     begin = now - timedelta(days=LOOKBACK_DAYS)
@@ -115,19 +97,19 @@ def fetch_bids() -> list[dict]:
     params = {
         "serviceKey": SERVICE_KEY,
         "type": "json",
+        "numOfRows": "100",
+        "pageNo": "1",
         "inqryDiv": "1",  # 1: 공고게시일시 기준
         "inqryBgnDt": begin.strftime("%Y%m%d0000"),
-        "inqryEndDt": now.strftime("%Y%m%d2359"),
-        "numOfRows": "500",
-        "pageNo": "1",
+        "inqryEndDt": now.strftime("%Y%m%d%H%M"),
+        "bidNtceNm": BASE_KEYWORD,  # 서버단에서 "도미니카" 포함 공고만 1차로 걸러줌
+        "bidClseExcpYn": "Y",  # 마감된 공고 제외
     }
-
-    query_url = build_query_url(API_BASE_URL, params)
 
     last_exc: Exception | None = None
     for attempt in range(1, 4):
         try:
-            resp = requests.get(query_url, timeout=30)
+            resp = requests.get(API_BASE_URL, params=params, timeout=30)
             resp.raise_for_status()
             data = resp.json()
             break
