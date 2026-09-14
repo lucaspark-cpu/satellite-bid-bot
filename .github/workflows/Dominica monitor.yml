@@ -1,0 +1,43 @@
+name: 도미니카 입찰공고 모니터링
+
+on:
+  schedule:
+    # KST 09:00 / 13:00 / 17:00  (UTC 00:00 / 04:00 / 08:00)
+    - cron: "0 0,4,8 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      - name: Python 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: 모니터링 스크립트 실행
+        env:
+          G2B_SERVICE_KEY: ${{ secrets.G2B_SERVICE_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+        run: python dominica_bid_monitor.py
+
+      - name: 상태 파일(sent_bids.json) 커밋
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain sent_bids.json)" ]; then
+            git add sent_bids.json
+            git commit -m "chore: 알림 발송 이력 갱신"
+            git push
+          fi
