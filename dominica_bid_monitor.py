@@ -25,8 +25,8 @@ import requests
 
 # 수신자 이메일 - 여기서 직접 추가/삭제
 RECIPIENTS: list[str] = [
-    "team_biz-plan@dabeeo.com",
-    "injun.park@dabeeo.com"
+    "example1@dabeeo.com",
+    "example2@dabeeo.com",
 ]
 
 # 판정 키워드: "도미니카"는 필수, 아래 중 1개 이상이 추가로 있어야 알림
@@ -53,7 +53,7 @@ STATE_FILE = Path(__file__).parent / "sent_bids.json"
 # NOTE: 공공데이터포털 API는 개편이 잦으므로, 기존 satellite-bid-bot에서
 # 실제로 쓰고 있는 엔드포인트/파라미터명과 다르면 그쪽 값으로 맞춰서 교체할 것.
 API_BASE_URL = "http://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPublicInfoServc"
-SERVICE_KEY = os.environ.get("G2B_SERVICE_KEY", "")
+SERVICE_KEY = os.environ.get("G2B_API_KEY", "")
 
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
