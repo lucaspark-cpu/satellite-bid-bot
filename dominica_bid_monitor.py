@@ -25,7 +25,7 @@ import requests
 
 # 수신자 이메일 - 여기서 직접 추가/삭제
 RECIPIENTS: list[str] = [
-    "lucas.park@dabeeo.com"
+    "lucas.park@dabeeo.com",
 ]
 
 # 판정 키워드: "도미니카"는 필수, 아래 중 1개 이상이 추가로 있어야 알림
@@ -48,10 +48,12 @@ LOOKBACK_DAYS = 14
 
 STATE_FILE = Path(__file__).parent / "sent_bids.json"
 
-# 나라장터 입찰공고정보서비스(공공데이터포털) - 용역 공고 조회
-# NOTE: 공공데이터포털 API는 개편이 잦으므로, 기존 satellite-bid-bot에서
-# 실제로 쓰고 있는 엔드포인트/파라미터명과 다르면 그쪽 값으로 맞춰서 교체할 것.
-API_BASE_URL = "https://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPublicInfoServc"
+# 나라장터 입찰공고정보서비스(공공데이터포털) - 용역, 검색조건(공고게시일시 등) 기반 조회
+# NOTE: 아래 URL의 "BidPublicInfoService04" 부분(버전)은 활용신청 문서에 명시되어 있지 않아
+# 추정값임. 공공데이터포털 마이페이지 > 해당 API 상세보기에서 "요청 URL(Request URL)"을
+# 직접 확인해서 실제 값과 다르면 이 줄을 그 값으로 교체할 것. 오퍼레이션명
+# (getBidPblancListInfoServcPPSSrch)은 활용신청 문서 12번 항목 기준으로 정확함.
+API_BASE_URL = "https://apis.data.go.kr/1230000/BidPublicInfoService04/getBidPblancListInfoServcPPSSrch"
 SERVICE_KEY = os.environ.get("G2B_API_KEY", "")
 
 GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
