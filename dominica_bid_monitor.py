@@ -2,7 +2,7 @@
 "도미니카" 관련 나라장터 입찰공고를 감시해 매 실행마다 이메일로 상태를 보고한다.
 
 - 최근 7일 공고는 있든 없든 매번 이메일 발송 (상단에 정리)
-- 최근 90일 이력은 별도 리스트로 함께 정리 (8~90일 전, 최근 7일과 중복 제외)
+- 최근 30일 이력은 별도 리스트로 함께 정리 (8~30일 전, 최근 7일과 중복 제외)
 - 취소/변경/재공고 등 공고 종류에 상관없이 제목에 "도미니카"가 들어간 건 모두 포함
 
 실행 주기: GitHub Actions에서 하루 3회(09:00 / 13:00 / 17:00 KST) 호출.
@@ -35,7 +35,7 @@ RECIPIENTS: list[str] = [
 BASE_KEYWORD = "도미니카"
 
 RECENT_DAYS = 7    # 이 기간은 매번 상단에 정리
-HISTORY_DAYS = 90  # 이 기간 전체를 조회하고, RECENT_DAYS 이전 것만 이력 리스트로 별도 정리
+HISTORY_DAYS = 30  # 이 기간 전체를 조회하고, RECENT_DAYS 이전 것만 이력 리스트로 별도 정리
 
 KST = timezone(timedelta(hours=9))
 
@@ -101,7 +101,7 @@ def _get_with_retry(params: dict) -> dict:
 
 
 def fetch_bids_90d() -> list[dict]:
-    """최근 HISTORY_DAYS 기간의 "도미니카" 관련 용역 입찰공고를 전부 조회한다.
+    """최근 HISTORY_DAYS 기간의 "도미니카" 관련 용역 입찰공고를 전부 조회한다 (data.go.kr 조회기간 제한상 30일 이내 유지).
 
     취소/변경/재공고를 걸러내지 않도록 bidClseExcpYn(마감 제외) 파라미터는 쓰지 않는다.
     """
@@ -215,7 +215,7 @@ def build_email_html(recent: list[dict], history: list[dict]) -> str:
     history_section = (
         "".join(_bid_card_html(b) for b in history)
         if history
-        else '<p style="font-size:13px;color:#718096;">8~90일 전 이력이 없습니다.</p>'
+        else '<p style="font-size:13px;color:#718096;">8~30일 전 이력이 없습니다.</p>'
     )
 
     return f"""
@@ -236,7 +236,7 @@ def build_email_html(recent: list[dict], history: list[dict]) -> str:
 
         <h3 style="font-size:15px;font-weight:bold;color:#718096;border-bottom:2px solid #cbd5e0;
                    padding-bottom:6px;margin:28px 0 12px 0;">
-          이력 (8~90일 전, {len(history)}건)
+          이력 (8~30일 전, {len(history)}건)
         </h3>
         {history_section}
       </div>
