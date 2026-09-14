@@ -28,7 +28,8 @@ import requests
 
 # 수신자 이메일 - 여기서 직접 추가/삭제
 RECIPIENTS: list[str] = [
-    "lucas.park@dabeeo.com",
+    "team_biz-plan@dabeeo.com",
+    "injun.park@dabeeo.com"
 ]
 
 # 판정 키워드: 제목에 이 단어만 포함되면 매칭 (취소/변경/재공고 등 종류 무관)
