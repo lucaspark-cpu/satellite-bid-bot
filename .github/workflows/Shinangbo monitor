@@ -1,0 +1,43 @@
+name: D2B Shinangbo Keyword Monitor
+
+on:
+  schedule:
+    # KST 매일 09:07 = UTC 00:07 (정각 지연 방지를 위해 애매한 분 사용)
+    - cron: '7 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shinangbo-monitor
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Shinangbo Monitor & Send Email
+        env:
+          D2B_API_KEY: ${{ secrets.D2B_API_KEY }}
+          SMTP_SERVER: smtp.gmail.com
+          SMTP_PORT: '587'
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: python shinangbo_monitor.py
