@@ -86,6 +86,16 @@ HTTP_TIMEOUT = (5, 20)      # (connect, read)
 MAX_PAGES = 10
 NUM_OF_ROWS = 100
 
+# 수집 상태 기록 — "공고가 없어서 조용한 날"과 "API가 막혀서 조용한 날"을 구분하기 위함.
+# fetch_g2b_bids()/fetch_d2b_bids()가 실행될 때마다 해당 소스 항목을 새로 채운다.
+#   status: "ok"(정상) | "partial"(일부 실패) | "failed"(전체 실패)
+#   errors: 사람이 읽을 수 있는 실패 사유 목록
+FETCH_STATUS: Dict[str, Dict[str, Any]] = {}
+
+
+def _set_fetch_status(source: str, status: str, errors: List[str]) -> None:
+    FETCH_STATUS[source] = {"status": status, "errors": errors}
+
 # D2B는 개발계정 일일 트래픽이 100건으로 낮아, 키워드별 반복 질의(G2B 방식) 대신
 # 공고일자 구간으로 1~수 회만 조회하고 calculate_score()로 클라이언트단 필터링한다.
 D2B_MAX_PAGES = 5
@@ -1091,6 +1101,7 @@ def fetch_g2b_bids(
     key = _api_key()
     if not key:
         print("[WARN] G2B_API_KEY / SERVICE_KEY 환경변수가 없습니다.")
+        _set_fetch_status("G2B", "failed", ["G2B_API_KEY 환경변수(Secret)가 설정되지 않음"])
         return []
 
     keywords = list(keywords or KEYWORDS)
@@ -1100,6 +1111,14 @@ def fetch_g2b_bids(
 
     seen: set = set()
     results: List[Dict[str, Any]] = []
+    failed_keywords: List[str] = []   # 1페이지부터 실패 → 해당 키워드 결과 전무
+    partial_errors: List[str] = []    # 2페이지 이후 실패 → 해당 키워드 결과 일부 누락
+
+    def _record_error(kw: str, page: int, msg: str) -> None:
+        if page == 1:
+            failed_keywords.append(kw)
+        else:
+            partial_errors.append(f"'{kw}' {page}페이지: {msg}")
 
     for kw in keywords:
         for page in range(1, MAX_PAGES + 1):
@@ -1121,15 +1140,19 @@ def fetch_g2b_bids(
                     payload = r.json()
                 except ValueError:
                     print(f"[API ERROR] '{kw}' p{page}: 비 JSON 응답 → {r.text[:180]}")
+                    _record_error(kw, page, "비 JSON 응답")
                     break
             except Exception as e:
                 print(f"[API ERROR] '{kw}' p{page}: {e}")
+                _record_error(kw, page, type(e).__name__)
                 break
 
             header = (payload.get("response", {}) or {}).get("header", {}) or {}
             code = str(header.get("resultCode", "00"))
             if code not in ("00", "0"):
                 print(f"[API WARN] '{kw}' resultCode={code} msg={header.get('resultMsg')}")
+                if code not in ("03",):  # 03 = 데이터 없음(NODATA) → 정상 상황
+                    _record_error(kw, page, f"resultCode={code} {header.get('resultMsg') or ''}".strip())
                 break
 
             items = _normalize_items(payload)
@@ -1174,6 +1197,17 @@ def fetch_g2b_bids(
 
     results.sort(key=lambda b: (-b["score"], b["bid_name"]))
     print(f"--- 수집 {len(seen)}건 / 통과 {len(results)}건 ---")
+
+    if keywords and len(failed_keywords) == len(keywords):
+        _set_fetch_status("G2B", "failed", [f"검색 키워드 {len(keywords)}개 전부 조회 실패 (나라장터 API 연결 불가 추정)"])
+    elif failed_keywords or partial_errors:
+        errs = []
+        if failed_keywords:
+            errs.append(f"키워드 {len(failed_keywords)}/{len(keywords)}개 조회 실패: {', '.join(failed_keywords)}")
+        errs.extend(partial_errors)
+        _set_fetch_status("G2B", "partial", errs)
+    else:
+        _set_fetch_status("G2B", "ok", [])
     return results
 
 
@@ -1219,6 +1253,7 @@ def fetch_d2b_bids(days: int = 3, min_score: int = SCORE_LOW_CUT) -> List[Dict[s
     key = _d2b_api_key()
     if not key:
         print("[WARN] D2B_API_KEY 환경변수가 없습니다.")
+        _set_fetch_status("D2B", "failed", ["D2B_API_KEY 환경변수(Secret)가 설정되지 않음"])
         return []
 
     bgn, end = _d2b_date_window(days)
@@ -1227,6 +1262,8 @@ def fetch_d2b_bids(days: int = 3, min_score: int = SCORE_LOW_CUT) -> List[Dict[s
 
     seen: set = set()
     results: List[Dict[str, Any]] = []
+
+    d2b_error: Optional[Tuple[int, str]] = None  # (실패 페이지, 사유)
 
     for page in range(1, D2B_MAX_PAGES + 1):
         params = {
@@ -1241,18 +1278,22 @@ def fetch_d2b_bids(days: int = 3, min_score: int = SCORE_LOW_CUT) -> List[Dict[s
             r.raise_for_status()
         except Exception as e:
             print(f"[D2B API ERROR] p{page}: {e}")
+            d2b_error = (page, type(e).__name__)
             break
 
         try:
             root = ET.fromstring(r.text)
         except ET.ParseError:
             print(f"[D2B API ERROR] p{page}: XML 파싱 실패 → {r.text[:180]}")
+            d2b_error = (page, "XML 파싱 실패")
             break
 
         header = root.find("header")
         code = _d2b_text(header, "resultCode") or "00"
         if code not in ("00", "0"):
             print(f"[D2B API WARN] resultCode={code} msg={_d2b_text(header, 'resultMsg')}")
+            if code not in ("03",):  # 03 = 데이터 없음(NODATA) → 정상 상황
+                d2b_error = (page, f"resultCode={code} {_d2b_text(header, 'resultMsg')}".strip())
             break
 
         body = root.find("body")
@@ -1315,6 +1356,13 @@ def fetch_d2b_bids(days: int = 3, min_score: int = SCORE_LOW_CUT) -> List[Dict[s
 
     results.sort(key=lambda b: (-b["score"], b["bid_name"]))
     print(f"--- D2B 수집 {len(seen)}건 / 통과 {len(results)}건 ---")
+
+    if d2b_error is None:
+        _set_fetch_status("D2B", "ok", [])
+    elif d2b_error[0] == 1:
+        _set_fetch_status("D2B", "failed", [f"국방전자조달 API 조회 실패: {d2b_error[1]}"])
+    else:
+        _set_fetch_status("D2B", "partial", [f"{d2b_error[0]}페이지부터 조회 실패: {d2b_error[1]} (앞 페이지 결과만 반영)"])
     return results
 
 

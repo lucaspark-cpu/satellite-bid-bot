@@ -1,5 +1,6 @@
 import os
 import smtplib
+import sys
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.utils import formataddr
@@ -15,6 +16,7 @@ from dabeeo_bid_master import (
     TIER_HIGH,
     TIER_MID,
     TIER_LOW,
+    FETCH_STATUS,
 )
 
 # 옵션: D2B 수집 함수가 존재할 경우에만 동적 임포트
@@ -63,7 +65,40 @@ def _friendly_summary(tier: str, matched: list, reasons: list, matched_project: 
     return (base + " — " + " / ".join(extras)) if extras else base
 
 
-def build_email_html(bids):
+def _collect_fetch_warnings():
+    """수집 단계 실패를 사람이 읽을 문장 목록으로 정리. 반환: (경고 목록, 전체 실패 여부)"""
+    labels = {"G2B": "나라장터(G2B)", "D2B": "국방전자조달(D2B)"}
+    warnings = []
+    for src in ("G2B", "D2B"):
+        st = FETCH_STATUS.get(src)
+        if not st or st["status"] == "ok":
+            continue
+        head = "수집 실패" if st["status"] == "failed" else "일부 수집 실패"
+        detail = " / ".join(st["errors"]) if st["errors"] else "원인 미상"
+        warnings.append(f"{labels[src]} {head} — {detail}")
+    attempted = [s for s in ("G2B", "D2B") if s in FETCH_STATUS]
+    all_failed = bool(attempted) and all(FETCH_STATUS[s]["status"] == "failed" for s in attempted)
+    return warnings, all_failed
+
+
+def _warning_banner_html(warnings):
+    if not warnings:
+        return ""
+    items = "".join(f"<li style='margin-bottom: 4px;'>{escape(w)}</li>" for w in warnings)
+    return f"""
+            <div style="background-color: #fff5f5; border: 1px solid #feb2b2; border-radius: 8px; padding: 14px 18px; margin-bottom: 20px;">
+                <p style="font-size: 14px; font-weight: bold; color: #c53030; margin: 0 0 8px 0;">
+                    ⚠️ 오늘은 공고 수집이 완전하지 않습니다 — 아래 소스의 공고가 누락됐을 수 있습니다.
+                </p>
+                <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: #742a2a; line-height: 1.6;">{items}</ul>
+                <p style="font-size: 12px; color: #9b2c2c; margin: 8px 0 0 0;">
+                    GitHub 저장소 Actions 탭에서 워크플로를 다시 실행(Run workflow)하면 재수집됩니다.
+                </p>
+            </div>
+    """
+
+
+def build_email_html(bids, warnings=None):
     """HTML 메일 양식 생성"""
     total_count = len(bids)
 
@@ -80,6 +115,7 @@ def build_email_html(bids):
             <h2 style="font-size: 22px; font-weight: bold; color: #1a202c; margin-bottom: 12px;">
                 🚀 나라장터 및 국방전자조달 통합 인텔리전스
             </h2>
+            {_warning_banner_html(warnings)}
             <p style="font-size: 14px; color: #4a5568; margin-top: 0; margin-bottom: 8px;">
                 다비오 비즈니스 도메인 연관도 스코어링 알고리즘에 따라 총 <strong style="color: #d69e2e;">{total_count}건</strong>의 진행 중인 유효 공고가 분류되었습니다.
             </p>
@@ -270,18 +306,16 @@ def build_email_html(bids):
     return html
 
 
-def send_email_notification(new_bids):
+def _send_html(subject, html_content):
+    """HTML 메일 발송. 성공 시 True, 실패 시 False."""
     if not SMTP_USER or not SMTP_PASSWORD or not RECEIVER_EMAIL:
         print("[ERROR] 이메일 환경변수가 지정되지 않았습니다.")
-        return
+        return False
 
-    html_content = build_email_html(new_bids)
-
-    high = sum(1 for b in new_bids if b.get("tier") == TIER_HIGH)
     receivers = RECEIVERS or [e.strip() for e in RECEIVER_EMAIL.split(",") if e.strip()]
 
     msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"[통합 입찰 리포트] 신규 {len(new_bids)}건 (상 {high}건)"
+    msg["Subject"] = subject
     msg["From"] = formataddr(("Dabeeo Bid Bot", SMTP_USER))
     msg["To"] = ", ".join(receivers)
     msg.attach(MIMEText(html_content, "html", "utf-8"))
@@ -292,15 +326,50 @@ def send_email_notification(new_bids):
             server.login(SMTP_USER, SMTP_PASSWORD)
             server.sendmail(SMTP_USER, receivers, msg.as_string())
         print(f"[SUCCESS] 이메일 발송 완료 ({len(receivers)}명)")
+        return True
     except Exception as e:
         print(f"[ERROR] 이메일 발송 실패: {e}")
+        return False
+
+
+def send_email_notification(new_bids, warnings=None):
+    high = sum(1 for b in new_bids if b.get("tier") == TIER_HIGH)
+    prefix = "⚠️[일부 수집 실패] " if warnings else ""
+    subject = f"{prefix}[통합 입찰 리포트] 신규 {len(new_bids)}건 (상 {high}건)"
+    return _send_html(subject, build_email_html(new_bids, warnings))
+
+
+def send_failure_notice(warnings, all_failed):
+    """공고 0건 + 수집 실패가 겹친 날: '공고 없음'으로 오해하지 않도록 안내 메일 발송."""
+    title = "🚨 오늘 입찰공고 수집에 실패했습니다" if all_failed else "⚠️ 오늘 일부 소스 수집에 실패했고, 통과된 공고는 없습니다"
+    html = f"""
+    <!DOCTYPE html>
+    <html><head><meta charset="utf-8"></head>
+    <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif; color: #333333; line-height: 1.6; margin: 0; padding: 20px;">
+        <div style="max-width: 900px; margin: 0 auto;">
+            <h2 style="font-size: 20px; color: #c53030; margin-bottom: 12px;">{title}</h2>
+            <p style="font-size: 14px; color: #4a5568;">
+                오늘 리포트가 비어 있는 이유는 <strong>공고가 없어서가 아니라 수집이 제대로 되지 않았기 때문</strong>일 수 있습니다.
+            </p>
+            {_warning_banner_html(warnings)}
+        </div>
+    </body></html>
+    """
+    subject = "🚨[수집 실패] 통합 입찰 리포트" if all_failed else "⚠️[일부 수집 실패] 통합 입찰 리포트 — 통과 공고 0건"
+    return _send_html(subject, html)
 
 
 def notify_new_bids():
     init_db()
 
     # G2B + D2B 공고 통합 수집
-    all_bids = fetch_g2b_bids() or []
+    FETCH_STATUS.clear()
+    all_bids = []
+    try:
+        all_bids.extend(fetch_g2b_bids() or [])
+    except Exception as e:
+        print(f"[WARN] G2B 수집 에러: {e}")
+        FETCH_STATUS["G2B"] = {"status": "failed", "errors": [f"예상치 못한 오류: {type(e).__name__}"]}
     if fetch_d2b_bids:
         try:
             d2b_res = fetch_d2b_bids()
@@ -308,23 +377,37 @@ def notify_new_bids():
                 all_bids.extend(d2b_res)
         except Exception as e:
             print(f"[WARN] D2B 수집 에러: {e}")
+            FETCH_STATUS["D2B"] = {"status": "failed", "errors": [f"예상치 못한 오류: {type(e).__name__}"]}
+
+    warnings, all_failed = _collect_fetch_warnings()
+    for w in warnings:
+        # GitHub Actions 실행 화면에 노란 경고로 표시됨
+        print(f"::warning title=수집 실패::{w}")
 
     if not all_bids:
+        if warnings:
+            sent = send_failure_notice(warnings, all_failed)
+            print("[실패] 수집 오류로 공고 0건 — 안내 메일 발송" + ("" if sent else " 실패"))
+            return 1 if (all_failed or not sent) else 0
         print("오늘 통과된 공고가 없습니다.")
-        return
+        return 0
 
     # 신규 여부 표시
     new_bid_nos = {b["bid_no"] for b in filter_new_bids(all_bids)}
     for bid in all_bids:
         bid["is_new"] = bid["bid_no"] in new_bid_nos
 
-    send_email_notification(all_bids)
+    if not send_email_notification(all_bids, warnings):
+        # 메일이 안 나갔으면 DB에 '보냈음'으로 기록하지 않는다 → 다음 실행에서 다시 신규로 잡힘
+        print("[실패] 이메일 발송 실패 — DB 저장 생략")
+        return 1
     new_bids = [b for b in all_bids if b["is_new"]]
     if new_bids:
         save_bids_to_db(new_bids)
 
     print(f"[완료] 전체 {len(all_bids)}건 발송 / 신규 {len(new_bids)}건 DB 저장")
+    return 1 if all_failed else 0
 
 
 if __name__ == "__main__":
-    notify_new_bids()
+    sys.exit(notify_new_bids())
